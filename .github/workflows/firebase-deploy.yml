@@ -28,6 +28,7 @@ jobs:
         run: |
           npm install -g firebase-tools
           echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_TELEGRAM_EXPENSE_BOT }}' > ./gcloud-key.json
-          firebase deploy --only functions --project homework-taskbot --set-env-vars TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
+          firebase functions:config:set telegram.bot_token="${{ secrets.TELEGRAM_BOT_TOKEN }}" --project homework-taskbot
+          firebase deploy --only functions --project homework-taskbot
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ./gcloud-key.json
