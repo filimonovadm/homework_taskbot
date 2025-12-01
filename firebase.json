@@ -11,6 +11,9 @@
     ],
     "predeploy": [
       "pip install -r requirements.txt"
-    ]
+    ],
+    "environment": {
+      "TELEGRAM_BOT_TOKEN": "YOUR_TELEGRAM_BOT_TOKEN_HERE"
+    }
   }
 }
