@@ -27,6 +27,7 @@ jobs:
       - name: Deploy to Firebase Functions
         run: |
           npm install -g firebase-tools
+          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_TELEGRAM_EXPENSE_BOT }}' > ./gcloud-key.json
           sed -i "s/YOUR_TELEGRAM_BOT_TOKEN_HERE/${{ secrets.TELEGRAM_BOT_TOKEN }}/g" firebase.json
           firebase deploy --only functions --project homework-taskbot
         env:
