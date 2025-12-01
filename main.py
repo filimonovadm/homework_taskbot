@@ -1,7 +1,8 @@
-from firebase_functions import https_fn, options, config
+from firebase_functions import https_fn, options
 from firebase_admin import initialize_app
 import telebot
 import os
+from firebase_functions import config
 
 options.set_global(
     region=options.SupportedRegion.EUROPE_WEST1,
