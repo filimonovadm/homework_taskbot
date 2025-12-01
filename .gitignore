@@ -5,3 +5,10 @@ __pycache__/
 
 # Env
 .env
+
+# Firebase
+firebase-debug.log
+firebase-debug.*.log
+
+# VSCode
+.vscode/

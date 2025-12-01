@@ -1,18 +1,10 @@
 import os
 import telebot
-from dotenv import load_dotenv
 import task_manager
 from telebot import types
 
 # --- Инициализация ---
-load_dotenv()
-BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-
-if BOT_TOKEN is None:
-    print("Ошибка: Токен TELEGRAM_BOT_TOKEN не найден.")
-    exit()
-
-bot = telebot.TeleBot(BOT_TOKEN)
+bot = telebot.TeleBot(os.getenv('TELEGRAM_BOT_TOKEN'))
 
 
 # --- Клавиатуры ---
@@ -129,8 +121,3 @@ def handle_callback_query(call):
     except Exception as e:
         print(f"Ошибка в обработчике колбэка: {e}")
         bot.answer_callback_query(call.id, "Произошла ошибка.")
-
-if __name__ == '__main__':
-    print("Бот запускается...")
-    bot.infinity_polling()
-    print("Бот остановлен.")
