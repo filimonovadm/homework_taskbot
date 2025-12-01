@@ -31,3 +31,4 @@ jobs:
           firebase deploy --only functions --project homework-taskbot
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ./gcloud-key.json
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
