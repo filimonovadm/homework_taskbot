@@ -2,7 +2,6 @@ from firebase_functions import https_fn, options
 from firebase_admin import initialize_app
 import telebot
 import os
-from firebase_functions import config
 
 options.set_global(
     region=options.SupportedRegion.EUROPE_WEST1,
@@ -10,7 +9,7 @@ options.set_global(
 
 initialize_app()
 
-bot = telebot.TeleBot(config().telegram.bot_token)
+bot = telebot.TeleBot(options.config().telegram.bot_token)
 
 @https_fn.on_request()
 def webhook(req: https_fn.Request) -> https_fn.Response:
