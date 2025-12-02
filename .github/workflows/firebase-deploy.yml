@@ -49,4 +49,4 @@ jobs:
           entry_point: webhook
           region: europe-west1
           source_dir: functions
-          set_env_vars: TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
+          env_vars: TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
