@@ -38,11 +38,11 @@ jobs:
 
       - name: Deploy to Firebase Functions
         id: deploy
-        uses: google-github-actions/deploy-cloudfunctions@v2
+        uses: google-github-actions/deploy-cloud-functions@v2
         with:
           name: webhook
           runtime: python311
           entry_point: webhook
           region: europe-west1
-          source: functions
+          source_dir: functions
           set_env_vars: TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
