@@ -9,6 +9,15 @@ __pycache__/
 # Firebase
 firebase-debug.log
 firebase-debug.*.log
+firebase.json-e
+.gcloudignore
 
 # VSCode
 .vscode/
+
+# Ignored files
+ignored_files/
+functions/.venv/
+
+# macOS
+.DS_Store

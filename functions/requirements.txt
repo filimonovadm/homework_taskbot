@@ -1,4 +1,3 @@
 pyTelegramBotAPI
-python-dotenv
 firebase-functions
 firebase-admin

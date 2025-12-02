@@ -1,6 +1,6 @@
 {
   "functions": {
-    "source": ".",
+    "source": "functions",
     "runtime": "python311",
     "codebase": "default",
     "ignore": [
@@ -9,11 +9,10 @@
       "firebase-debug.log",
       "firebase-debug.*.log"
     ],
-    "predeploy": [
-      "pip install -r requirements.txt"
-    ],
-    "environment": {
-      "TELEGRAM_BOT_TOKEN": "YOUR_TELEGRAM_BOT_TOKEN_HERE"
-    }
+
+    "predeploy": "cd functions && python3.11 -m venv venv && source venv/bin/activate && pip install -r requirements.txt"
+
+
+
   }
 }

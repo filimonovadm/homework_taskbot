@@ -6,8 +6,11 @@ on:
       - master
 
 jobs:
-  build_and_deploy:
+  deploy_function:
     runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
 
     steps:
       - name: Checkout code
@@ -20,15 +23,26 @@ jobs:
 
       - name: Install dependencies
         run: |
+          cd functions
           python3.11 -m venv venv
           source venv/bin/activate
           pip install -r requirements.txt
+          cd ..
+
+      - name: Authenticate to Google Cloud
+        id: 'auth'
+        uses: 'google-github-actions/auth@v2'
+        with:
+          workload_identity_provider: 'projects/1012765918018/locations/global/workloadIdentityPools/github-pool/providers/github-provider'
+          service_account: 'telegram-bot-deployer@homework-taskbot.iam.gserviceaccount.com' # Replace with your service account email
 
       - name: Deploy to Firebase Functions
-        run: |
-          npm install -g firebase-tools
-          echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}" > .env
-          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_TELEGRAM_EXPENSE_BOT }}' > ./gcloud-key.json
-          firebase deploy --only functions --project homework-taskbot
-        env:
-          GOOGLE_APPLICATION_CREDENTIALS: ./gcloud-key.json
+        id: deploy
+        uses: google-github-actions/deploy-cloudfunctions@v2
+        with:
+          name: webhook
+          runtime: python311
+          entry_point: webhook
+          region: europe-west1
+          source: functions
+          set_env_vars: TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
