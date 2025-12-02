@@ -13,6 +13,10 @@ print(f"TELEGRAM_BOT_TOKEN: {telegram_bot_token}") # Debug print
 
 bot = telebot.TeleBot(telegram_bot_token)
 
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    bot.reply_to(message, "Привет! Я твой Homework Taskbot. Как я могу помочь?")
+
 @https_fn.on_request(region="europe-west1")
 def webhook(req: https_fn.Request) -> https_fn.Response:
     try:
