@@ -1,5 +1,6 @@
 from firebase_admin import firestore
 import uuid
+from datetime import datetime
 from typing import List, Dict, Any
 
 TASKS_COLLECTION = "tasks"
@@ -19,6 +20,7 @@ def add_task(text: str) -> Dict[str, Any]:
         "status": STATUS_NEW,
         "created_by": None,
         "assigned_to": None,
+        "created_at": datetime.now().isoformat()  # Add timestamp
     }
     db.collection(TASKS_COLLECTION).document(task_id).set(new_task)
     return new_task

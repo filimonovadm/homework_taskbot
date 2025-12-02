@@ -4,6 +4,8 @@ import telebot
 import os
 import task_manager
 from telebot import types
+from datetime import datetime
+
 
 # Initialize Firebase Admin SDK
 initialize_app()
@@ -39,6 +41,14 @@ def format_task_message(task: dict) -> str:
 `Статус: {task['status']}`"""
     if task.get('assigned_to'):
         text += f"\n`Исполнитель: {task['assigned_to']}`"
+    if task.get('created_at'):
+        try:
+            # Parse the ISO formatted string back to a datetime object
+            created_datetime = datetime.fromisoformat(task['created_at'])
+            text += f"\n`Дата создания: {created_datetime.strftime('%d.%m.%Y %H:%M')}`"
+        except ValueError:
+            # Fallback if the date format is unexpected
+            text += f"\n`Дата создания: {task['created_at']}`"
     return text
 
 def send_welcome_and_help(message):
