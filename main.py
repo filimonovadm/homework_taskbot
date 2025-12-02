@@ -9,7 +9,6 @@ load_dotenv()
 initialize_app()
 
 telegram_bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
-print(f"TELEGRAM_BOT_TOKEN: {telegram_bot_token}") # Debug print
 
 bot = telebot.TeleBot(telegram_bot_token)
 
