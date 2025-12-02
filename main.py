@@ -8,7 +8,10 @@ load_dotenv()
 
 initialize_app()
 
-bot = telebot.TeleBot(os.environ.get("TELEGRAM_BOT_TOKEN"))
+telegram_bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+print(f"TELEGRAM_BOT_TOKEN: {telegram_bot_token}") # Debug print
+
+bot = telebot.TeleBot(telegram_bot_token)
 
 @https_fn.on_request(region="europe-west1")
 def webhook(req: https_fn.Request) -> https_fn.Response:
