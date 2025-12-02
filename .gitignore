@@ -17,7 +17,6 @@ firebase.json-e
 
 # Ignored files
 ignored_files/
-functions/.venv/
-
+functions/venv/
 # macOS
 .DS_Store
