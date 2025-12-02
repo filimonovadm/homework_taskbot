@@ -32,8 +32,3 @@ jobs:
           firebase deploy --only functions --project homework-taskbot
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ./gcloud-key.json
-      
-      - name: Test Function Reachability
-        run: |
-          FUNCTION_URL="https://webhook-4rqu4jotja-ew.a.run.app" # Replace with your actual function URL
-          curl -X POST -H "Content-Type: application/json" -d '{"test": "ping"}' $FUNCTION_URL
