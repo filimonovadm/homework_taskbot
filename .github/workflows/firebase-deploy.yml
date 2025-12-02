@@ -42,7 +42,7 @@ jobs:
 
       - name: Deploy to Firebase Functions
         id: deploy
-        uses: google-github-actions/deploy-cloud-functions@v2
+        uses: google-github-actions/deploy-cloud-functions@v4
         with:
           name: webhook
           runtime: python311
