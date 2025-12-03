@@ -170,21 +170,31 @@ def show_tasks(bot, message, status: str | None = None):
 def handle_callback_query(bot, call):
     """Обрабатывает нажатия на инлайн-кнопки."""
     try:
-        action, task_id = call.data.split('_', 1)
+        parts = call.data.split('_') # Split into all parts
+        
+        # The task_id is always the last part
+        task_id = parts[-1]
+        
+        # Reconstruct the action string based on the number of parts
+        if len(parts) == 2: # e.g., "take_UUID", "done_UUID", "delete_UUID", "archive_UUID"
+            action_full = parts[0]
+        elif len(parts) == 3 and parts[0] == "reopen": # e.g., "reopen_new_UUID"
+            action_full = f"{parts[0]}_{parts[1]}" # Reconstruct "reopen_new"
+        elif len(parts) == 4 and parts[0] == "reopen" and parts[1] == "in" and parts[2] == "progress": # e.g., "reopen_in_progress_UUID"
+            action_full = f"{parts[0]}_{parts[1]}_{parts[2]}" # Reconstruct "reopen_in_progress"
+        else:
+            action_full = "unknown" # Fallback for unexpected formats
+
         user_info = call.from_user
         
         new_status = None
-        if action == "take":
+        if action_full == "take":
             new_status = task_manager.STATUS_IN_PROGRESS
-        elif action == "done":
+        elif action_full == "done":
             new_status = task_manager.STATUS_DONE
-        elif action == "archive":
+        elif action_full == "archive":
             new_status = task_manager.STATUS_ARCHIVED
-        elif action == "reopen_new":
-            new_status = task_manager.STATUS_NEW
-        elif action == "reopen_in_progress":
-            new_status = task_manager.STATUS_IN_PROGRESS
-        elif action == "delete":
+        elif action_full == "delete":
             success = task_manager.delete_task(task_id)
             if success:
                 bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, 
@@ -193,6 +203,10 @@ def handle_callback_query(bot, call):
             else:
                 bot.answer_callback_query(call.id, "Не удалось удалить задачу.")
             return # Exit after deleting
+        elif action_full == "reopen_new":
+            new_status = task_manager.STATUS_NEW
+        elif action_full == "reopen_in_progress":
+            new_status = task_manager.STATUS_IN_PROGRESS
 
         if not new_status:
             bot.answer_callback_query(call.id, "Неизвестное действие.")
