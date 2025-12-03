@@ -37,7 +37,8 @@ def add_task(chat_id: int, text: str) -> Dict[str, Any]:
         "status": STATUS_NEW,
         "created_by": None,
         "assigned_to": None,
-        "created_at": datetime.now().isoformat()  # Add timestamp
+        "created_at": datetime.now().isoformat(),
+        "accumulated_time_seconds": 0,  # Initialize accumulator
     }
     db.collection(TASKS_COLLECTION).document(task_id).set(new_task)
     return new_task
@@ -82,41 +83,68 @@ def delete_task(task_id: str) -> bool:
     return False
 
 def update_task_status(task_id: str, new_status: str, user_info: Any) -> bool:
-    """Updates the status of a task and who it's assigned to."""
+    """Updates the status of a task and manages accumulated time."""
     db = firestore.client()
     doc_ref = db.collection(TASKS_COLLECTION).document(task_id)
     doc = doc_ref.get()
-    if doc.exists:
-        current_task = doc.to_dict()
-        current_status = current_task.get("status")
-        update_data = {}
 
-        # Define allowed transitions
-        allowed_transitions = {
-            STATUS_NEW: [STATUS_IN_PROGRESS, STATUS_ARCHIVED],
-            STATUS_IN_PROGRESS: [STATUS_NEW, STATUS_DONE, STATUS_ARCHIVED],
-            STATUS_DONE: [STATUS_IN_PROGRESS, STATUS_ARCHIVED],
-            STATUS_ARCHIVED: [] # Archived tasks cannot change status
-        }
+    if not doc.exists:
+        return False
 
-        if new_status not in allowed_transitions.get(current_status, []):
-            print(f"Invalid status transition from {current_status} to {new_status} for task {task_id}")
-            return False
+    current_task = doc.to_dict()
+    current_status = current_task.get("status")
+    update_data = {}
 
-        update_data["status"] = new_status
+    allowed_transitions = {
+        STATUS_NEW: [STATUS_IN_PROGRESS, STATUS_ARCHIVED],
+        STATUS_IN_PROGRESS: [STATUS_NEW, STATUS_DONE, STATUS_ARCHIVED],
+        STATUS_DONE: [STATUS_IN_PROGRESS, STATUS_ARCHIVED],
+        STATUS_ARCHIVED: []
+    }
 
-        if new_status == STATUS_IN_PROGRESS and user_info:
+    if new_status not in allowed_transitions.get(current_status, []):
+        print(f"Invalid status transition from {current_status} to {new_status} for task {task_id}")
+        return False
+
+    update_data["status"] = new_status
+    now = datetime.now()
+
+    # --- Handle leaving a state ---
+    if current_status == STATUS_IN_PROGRESS and new_status != STATUS_IN_PROGRESS:
+        # Task is moving OUT of 'in progress'. Finalize the session time.
+        in_progress_at_str = current_task.get("in_progress_at")
+        if in_progress_at_str:
+            try:
+                in_progress_dt = datetime.fromisoformat(in_progress_at_str)
+                session_seconds = (now - in_progress_dt).total_seconds()
+                
+                current_accumulated = current_task.get("accumulated_time_seconds", 0)
+                update_data["accumulated_time_seconds"] = current_accumulated + session_seconds
+                
+                # Clean up the session start time
+                update_data["in_progress_at"] = firestore.DELETE_FIELD
+            except (ValueError, TypeError) as e:
+                print(f"Could not parse in_progress_at '{in_progress_at_str}': {e}")
+    
+    # --- Handle entering a state ---
+    if new_status == STATUS_IN_PROGRESS:
+        update_data["in_progress_at"] = now.isoformat()
+        if user_info:
             update_data["assigned_to"] = f"{user_info.first_name} (@{user_info.username})"
-        elif new_status == STATUS_NEW:
-            # If moving back to NEW, clear assigned_to
-            update_data["assigned_to"] = firestore.DELETE_FIELD
-        
-        if new_status == STATUS_DONE:
-            update_data["completed_at"] = datetime.now().isoformat()
-        elif current_status == STATUS_DONE and new_status != STATUS_DONE:
-            # If status is changing from DONE to something else (e.g., IN_PROGRESS), remove completed_at
+        # If reopening from done, clear completion time
+        if "completed_at" in current_task:
             update_data["completed_at"] = firestore.DELETE_FIELD
-            
-        doc_ref.update(update_data)
-        return True
-    return False
+
+    elif new_status == STATUS_DONE:
+        update_data["completed_at"] = now.isoformat()
+
+    elif new_status == STATUS_NEW:
+        # Unassign user and clear completion time.
+        # As per user request, accumulated time is NOT cleared.
+        if "assigned_to" in current_task:
+            update_data["assigned_to"] = firestore.DELETE_FIELD
+        if "completed_at" in current_task:
+            update_data["completed_at"] = firestore.DELETE_FIELD
+    
+    doc_ref.update(update_data)
+    return True

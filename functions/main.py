@@ -37,6 +37,39 @@ def get_task_keyboard(task_id: str, status: str):
         keyboard.add(button_archive, button_reopen_in_progress)
     return keyboard
 
+def format_accumulated_time(total_seconds: float) -> str:
+    """Formats a total number of seconds into a human-readable string."""
+    if total_seconds < 0:
+        total_seconds = 0
+
+    total_seconds = int(total_seconds)
+    days = total_seconds // 86400
+    seconds_remaining = total_seconds % 86400
+    hours = seconds_remaining // 3600
+    minutes = (seconds_remaining % 3600) // 60
+
+    def pluralize(number, one, few, many):
+        if number % 10 == 1 and number % 100 != 11:
+            return one
+        elif 2 <= number % 10 <= 4 and (number % 100 < 10 or number % 100 >= 20):
+            return few
+        else:
+            return many
+
+    parts = []
+    if days > 0:
+        parts.append(f"{days} {pluralize(days, 'день', 'дня', 'дней')}")
+    if hours > 0:
+        parts.append(f"{hours} {pluralize(hours, 'час', 'часа', 'часов')}")
+    if minutes > 0 or not parts:
+        parts.append(f"{minutes} {pluralize(minutes, 'минута', 'минуты', 'минут')}")
+
+    if not parts:
+        return "Затраченное время: 0 минут"
+
+    return f"Затраченное время: {' '.join(parts)}"
+
+
 def format_task_message(task: dict) -> str:
     """Форматирует текст сообщения для задачи."""
     status_emoji = {
@@ -46,8 +79,10 @@ def format_task_message(task: dict) -> str:
     }
     text = f"""{status_emoji.get(task['status'], '')} *{task['text']}*
 `Статус: {task['status']}`"""
+
     if task.get('assigned_to'):
         text += f"\n`Исполнитель: {task['assigned_to']}`"
+
     if task.get('created_at'):
         try:
             created_datetime = datetime.fromisoformat(task['created_at'])
@@ -55,6 +90,8 @@ def format_task_message(task: dict) -> str:
             text += f"\n`Дата создания: {local_created_datetime.strftime('%d.%m.%Y %H:%M')}`"
         except ValueError:
             text += f"\n`Дата создания: {task['created_at']}`"
+            
+    # --- Completion Date (only show if actually completed) ---
     if task.get('completed_at'):
         try:
             completed_datetime = datetime.fromisoformat(task['completed_at'])
@@ -62,6 +99,18 @@ def format_task_message(task: dict) -> str:
             text += f"\n`Дата завершения: {local_completed_datetime.strftime('%d.%m.%Y %H:%M')}`"
         except ValueError:
             text += f"\n`Дата завершения: {task['completed_at']}`"
+
+    # --- Time Spent Logic ---
+    time_spent_str = ""
+    accumulated_seconds = task.get("accumulated_time_seconds", 0)
+
+    if task['status'] == task_manager.STATUS_DONE and accumulated_seconds > 0:
+        # For done tasks, show the final accumulated time
+        time_spent_str = format_accumulated_time(accumulated_seconds)
+
+    if time_spent_str:
+        text += f"\n`{time_spent_str}`"
+            
     return text
 
 

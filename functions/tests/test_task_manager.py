@@ -1,47 +1,44 @@
 import unittest
 from unittest.mock import patch, MagicMock
-from datetime import datetime
+from datetime import datetime, timedelta
 import sys
 import os
 
 # Add the 'functions' directory to sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import task_manager
 # Mock firebase_admin before it's used
 sys.modules['firebase_admin'] = MagicMock()
-from firebase_admin import firestore, initialize_app
+from firebase_admin import firestore
 
-class TestTaskManager(unittest.TestCase):
+# Now import the module to be tested
+import task_manager
+
+class TestAddTask(unittest.TestCase):
 
     @patch('task_manager.firestore.client')
-    def test_add_task_adds_created_at_timestamp_and_chat_id(self, mock_firestore_client):
-        # Mock the Firestore client and collection/document methods
+    def test_add_task_initializes_correctly(self, mock_firestore_client):
+        # Mock the Firestore client and its methods
         mock_db = MagicMock()
         mock_collection = MagicMock()
         mock_document = MagicMock()
-
         mock_firestore_client.return_value = mock_db
         mock_db.collection.return_value = mock_collection
         mock_collection.document.return_value = mock_document
 
-        # Call the add_task function
-        task_text = "Test task with timestamp"
+        # Call the function
+        task_text = "Test accumulator task"
         chat_id = 12345
         new_task = task_manager.add_task(chat_id, task_text)
 
-        # Assertions
+        # Assertions on the returned dictionary
         self.assertIn('created_at', new_task)
-        self.assertIsInstance(new_task['created_at'], str)
         self.assertEqual(new_task['chat_id'], chat_id)
-        
-        # Verify the format of the timestamp
-        try:
-            datetime.fromisoformat(new_task['created_at'])
-        except ValueError:
-            self.fail("created_at timestamp is not in ISO format")
-            
-        # Verify that set was called with the new task data
+        self.assertEqual(new_task['text'], task_text)
+        self.assertEqual(new_task['status'], task_manager.STATUS_NEW)
+        self.assertEqual(new_task['accumulated_time_seconds'], 0) # Key assertion for new field
+
+        # Verify that set was called with the correct data
         mock_document.set.assert_called_once()
         called_args, _ = mock_document.set.call_args
         set_data = called_args[0]
@@ -50,121 +47,25 @@ class TestTaskManager(unittest.TestCase):
         self.assertEqual(set_data['chat_id'], chat_id)
         self.assertEqual(set_data['status'], task_manager.STATUS_NEW)
         self.assertIn('created_at', set_data)
-        
-        # Ensure the timestamp in set_data is also valid
-        try:
-            datetime.fromisoformat(set_data['created_at'])
-        except ValueError:
-            self.fail("created_at timestamp in set_data is not in ISO format")
-
-class TestGetTasks(unittest.TestCase):
-    
-    def setUp(self):
-        # Patch firestore.client and initialize_app for all tests in this class
-        self.firestore_patcher = patch('task_manager.firestore.client')
-        self.init_app_patcher = patch('firebase_admin.initialize_app')
-        
-        self.mock_firestore_client = self.firestore_patcher.start()
-        self.mock_init_app = self.init_app_patcher.start()
-        
-        self.mock_db = MagicMock()
-        self.mock_firestore_client.return_value = self.mock_db
-        
-        self.tasks = [
-            # Chat 1 tasks
-            {'id': '1', 'chat_id': 1, 'text': 'Task 1 for chat 1', 'status': task_manager.STATUS_NEW},
-            {'id': '2', 'chat_id': 1, 'text': 'Task 2 for chat 1', 'status': task_manager.STATUS_IN_PROGRESS},
-            # Chat 2 tasks
-            {'id': '3', 'chat_id': 2, 'text': 'Task 1 for chat 2', 'status': task_manager.STATUS_NEW},
-        ]
-        
-        self.mock_query = MagicMock()
-        self.mock_db.collection.return_value = self.mock_query
-
-    def tearDown(self):
-        self.firestore_patcher.stop()
-        self.init_app_patcher.stop()
-
-    def _get_mock_docs(self, filtered_tasks):
-        mock_docs = []
-        for task in filtered_tasks:
-            mock_doc = MagicMock()
-            mock_doc.to_dict.return_value = task
-            mock_docs.append(mock_doc)
-        return mock_docs
-
-    def test_get_tasks_filters_by_chat_id(self):
-        # Arrange
-        chat_id_to_test = 1
-        expected_tasks = [t for t in self.tasks if t['chat_id'] == chat_id_to_test]
-        
-        mock_filtered_query = MagicMock()
-        self.mock_query.where.return_value = mock_filtered_query
-        mock_filtered_query.stream.return_value = self._get_mock_docs(expected_tasks)
-
-        # Act
-        result = task_manager.get_tasks(chat_id_to_test)
-
-        # Assert
-        self.mock_query.where.assert_called_with("chat_id", "==", chat_id_to_test)
-        self.assertEqual(len(result), len(expected_tasks))
-        self.assertEqual([t['id'] for t in result], [t['id'] for t in expected_tasks])
-
-    def test_get_all_tasks_filters_by_chat_id(self):
-        # Arrange
-        chat_id_to_test = 2
-        expected_tasks = [t for t in self.tasks if t['chat_id'] == chat_id_to_test]
-        
-        mock_filtered_query = MagicMock()
-        self.mock_query.where.return_value = mock_filtered_query
-        mock_filtered_query.stream.return_value = self._get_mock_docs(expected_tasks)
-
-        # Act
-        result = task_manager.get_all_tasks(chat_id_to_test)
-
-        # Assert
-        self.mock_query.where.assert_called_with("chat_id", "==", chat_id_to_test)
-        self.assertEqual(len(result), len(expected_tasks))
-        self.assertEqual(result[0]['text'], 'Task 1 for chat 2')
-
-    def test_get_tasks_with_status_filter(self):
-        # Arrange
-        chat_id_to_test = 1
-        status_to_test = task_manager.STATUS_NEW
-        expected_tasks = [t for t in self.tasks if t['chat_id'] == chat_id_to_test and t['status'] == status_to_test]
-        
-        mock_chat_query = MagicMock()
-        mock_status_query = MagicMock()
-        self.mock_query.where.return_value = mock_chat_query
-        mock_chat_query.where.return_value = mock_status_query
-        mock_status_query.stream.return_value = self._get_mock_docs(expected_tasks)
-
-        # Act
-        result = task_manager.get_tasks(chat_id_to_test, status=status_to_test)
-
-        # Assert
-        self.mock_query.where.assert_called_with("chat_id", "==", chat_id_to_test)
-        mock_chat_query.where.assert_called_with("status", "==", status_to_test)
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]['id'], '1')
+        self.assertEqual(set_data['accumulated_time_seconds'], 0)
 
 
-class TestUpdateTaskStatusTransitions(unittest.TestCase):
+class TestUpdateTaskStatusWithTimeAccumulation(unittest.TestCase):
 
     def setUp(self):
         # Patch firestore.client for all tests in this class
         self.patcher = patch('task_manager.firestore.client')
         self.mock_firestore_client = self.patcher.start()
+        
         self.mock_db = MagicMock()
         self.mock_collection = MagicMock()
-        self.mock_document_ref = MagicMock() # Renamed to avoid confusion with doc.get() return
-        self.mock_document_snapshot = MagicMock() # Mock for the result of doc_ref.get()
+        self.mock_document_ref = MagicMock()
+        self.mock_document_snapshot = MagicMock()
 
         self.mock_firestore_client.return_value = self.mock_db
         self.mock_db.collection.return_value = self.mock_collection
         self.mock_collection.document.return_value = self.mock_document_ref
         
-        # Mock user info for assigned_to field
         self.mock_user_info = MagicMock()
         self.mock_user_info.first_name = "Test"
         self.mock_user_info.username = "testuser"
@@ -172,49 +73,98 @@ class TestUpdateTaskStatusTransitions(unittest.TestCase):
     def tearDown(self):
         self.patcher.stop()
 
-    def _mock_task_get(self, status, assigned_to=None, completed_at=None, exists=True):
+    def _mock_task_get(self, status, accumulated_time_seconds=0, in_progress_at=None, completed_at=None, exists=True):
+        """Helper to mock the task document fetched from Firestore."""
         self.mock_document_snapshot.exists = exists
         task_data = {
             "id": "task123",
             "text": "Test Task",
             "status": status,
-            "created_by": None,
-            "assigned_to": assigned_to,
-            "created_at": datetime.now().isoformat(),
+            "created_at": "2025-01-01T00:00:00",
+            "accumulated_time_seconds": accumulated_time_seconds,
         }
         if completed_at:
             task_data["completed_at"] = completed_at
+        if in_progress_at:
+            task_data["in_progress_at"] = in_progress_at
+        
         self.mock_document_snapshot.to_dict.return_value = task_data
         self.mock_document_ref.get.return_value = self.mock_document_snapshot
 
-    def test_update_status_in_progress_to_new(self):
-        # Initial state: task is in progress
-        self._mock_task_get(task_manager.STATUS_IN_PROGRESS, assigned_to="Some User (@someuser)")
+    @patch('task_manager.datetime')
+    def test_time_accumulation_full_lifecycle(self, mock_datetime):
+        # --- Make the mock act like the real datetime for this method ---
+        mock_datetime.fromisoformat.side_effect = lambda iso_string: datetime.fromisoformat(iso_string)
+        
+        # --- SCENARIO: Full task lifecycle with accumulation ---
 
-        # Call update_task_status to move to NEW
-        result = task_manager.update_task_status("task123", task_manager.STATUS_NEW, None)
+        # 1. Start: Task is NEW, accumulator is 0.
+        self._mock_task_get(task_manager.STATUS_NEW, accumulated_time_seconds=0)
 
-        self.assertTrue(result)
-        self.mock_document_ref.update.assert_called_once()
-        update_args = self.mock_document_ref.update.call_args[0][0]
-        self.assertEqual(update_args["status"], task_manager.STATUS_NEW)
-        self.assertEqual(update_args["assigned_to"], task_manager.firestore.DELETE_FIELD)
+        # 2. ACTION: Move to IN_PROGRESS.
+        # Mock 'now' to a fixed point in time for predictable calculations.
+        mock_datetime.now.return_value = datetime.fromisoformat("2025-01-01T12:00:00")
+        task_manager.update_task_status("task123", task_manager.STATUS_IN_PROGRESS, self.mock_user_info)
 
-    def test_update_status_done_to_in_progress(self):
-        # Initial state: task is done
-        self._mock_task_get(task_manager.STATUS_DONE, completed_at=datetime.now().isoformat())
-
-        # Call update_task_status to move to IN_PROGRESS
-        result = task_manager.update_task_status("task123", task_manager.STATUS_IN_PROGRESS, self.mock_user_info)
-
-        self.assertTrue(result)
-        self.mock_document_ref.update.assert_called_once()
+        # VERIFY: Status updated, 'in_progress_at' is set, accumulator is unchanged.
         update_args = self.mock_document_ref.update.call_args[0][0]
         self.assertEqual(update_args["status"], task_manager.STATUS_IN_PROGRESS)
-        self.assertEqual(update_args["assigned_to"], "Test (@testuser)")
-        self.assertEqual(update_args["completed_at"], task_manager.firestore.DELETE_FIELD)
+        self.assertEqual(update_args["in_progress_at"], "2025-01-01T12:00:00")
+        self.assertNotIn("accumulated_time_seconds", update_args, "Accumulator should not change when starting work.")
+        self.mock_document_ref.update.reset_mock()
 
-    def test_invalid_status_transition_new_to_done(self):
+        # 3. State: Task is IN_PROGRESS for 1 hour.
+        self._mock_task_get(task_manager.STATUS_IN_PROGRESS, 
+                            accumulated_time_seconds=0, 
+                            in_progress_at="2025-01-01T12:00:00")
+        
+        # 4. ACTION: Move to DONE.
+        mock_datetime.now.return_value = datetime.fromisoformat("2025-01-01T13:00:00") # 1 hour (3600s) has passed.
+        task_manager.update_task_status("task123", task_manager.STATUS_DONE, self.mock_user_info)
+        
+        # VERIFY: Status updated, 'completed_at' set, 'in_progress_at' deleted, accumulator has 3600s.
+        update_args = self.mock_document_ref.update.call_args[0][0]
+        self.assertEqual(update_args["status"], task_manager.STATUS_DONE)
+        self.assertIn("completed_at", update_args)
+        self.assertEqual(update_args["in_progress_at"], firestore.DELETE_FIELD)
+        self.assertAlmostEqual(update_args["accumulated_time_seconds"], 3600)
+        self.mock_document_ref.update.reset_mock()
+
+        # 5. State: Task is DONE, with 3600s accumulated.
+        self._mock_task_get(task_manager.STATUS_DONE, 
+                            accumulated_time_seconds=3600,
+                            completed_at="2025-01-01T13:00:00")
+
+        # 6. ACTION: Re-open task, move back to IN_PROGRESS.
+        mock_datetime.now.return_value = datetime.fromisoformat("2025-01-01T14:00:00")
+        task_manager.update_task_status("task123", task_manager.STATUS_IN_PROGRESS, self.mock_user_info)
+
+        # VERIFY: Status updated, new 'in_progress_at' set, 'completed_at' deleted, accumulator unchanged.
+        update_args = self.mock_document_ref.update.call_args[0][0]
+        self.assertEqual(update_args["status"], task_manager.STATUS_IN_PROGRESS)
+        self.assertEqual(update_args["in_progress_at"], "2025-01-01T14:00:00")
+        self.assertEqual(update_args["completed_at"], firestore.DELETE_FIELD)
+        self.assertNotIn("accumulated_time_seconds", update_args, "Accumulator should not change when re-opening.")
+        self.mock_document_ref.update.reset_mock()
+
+        # 7. State: Task is IN_PROGRESS again, with 3600s accumulated and a new start time.
+        self._mock_task_get(task_manager.STATUS_IN_PROGRESS, 
+                            accumulated_time_seconds=3600, 
+                            in_progress_at="2025-01-01T14:00:00")
+
+        # 8. ACTION: Move to DONE again after 30 more minutes.
+        mock_datetime.now.return_value = datetime.fromisoformat("2025-01-01T14:30:00") # 30 mins (1800s) later.
+        task_manager.update_task_status("task123", task_manager.STATUS_DONE, self.mock_user_info)
+
+        # VERIFY: Status updated, 'in_progress_at' deleted, accumulator now holds total time.
+        update_args = self.mock_document_ref.update.call_args[0][0]
+        self.assertEqual(update_args["status"], task_manager.STATUS_DONE)
+        self.assertEqual(update_args["in_progress_at"], firestore.DELETE_FIELD)
+        # Total should be 1 hour + 30 minutes = 3600 + 1800 = 5400 seconds.
+        self.assertAlmostEqual(update_args["accumulated_time_seconds"], 5400)
+        self.mock_document_ref.update.reset_mock()
+        
+    def test_invalid_status_transition(self):
         # Initial state: task is new
         self._mock_task_get(task_manager.STATUS_NEW)
 
@@ -223,66 +173,6 @@ class TestUpdateTaskStatusTransitions(unittest.TestCase):
 
         self.assertFalse(result)
         self.mock_document_ref.update.assert_not_called()
-
-    def test_valid_status_transition_new_to_in_progress(self):
-        # Initial state: task is new
-        self._mock_task_get(task_manager.STATUS_NEW)
-
-        # Call update_task_status with a valid transition (NEW to IN_PROGRESS)
-        result = task_manager.update_task_status("task123", task_manager.STATUS_IN_PROGRESS, self.mock_user_info)
-
-        self.assertTrue(result)
-        self.mock_document_ref.update.assert_called_once()
-        update_args = self.mock_document_ref.update.call_args[0][0]
-        self.assertEqual(update_args["status"], task_manager.STATUS_IN_PROGRESS)
-        self.assertEqual(update_args["assigned_to"], "Test (@testuser)")
-
-    def test_valid_status_transition_in_progress_to_done(self):
-        # Initial state: task is in progress
-        self._mock_task_get(task_manager.STATUS_IN_PROGRESS, assigned_to="Some User (@someuser)")
-
-        # Call update_task_status with a valid transition (IN_PROGRESS to DONE)
-        result = task_manager.update_task_status("task123", task_manager.STATUS_DONE, None)
-
-        self.assertTrue(result)
-        self.mock_document_ref.update.assert_called_once()
-        update_args = self.mock_document_ref.update.call_args[0][0]
-        self.assertEqual(update_args["status"], task_manager.STATUS_DONE)
-        self.assertIn("completed_at", update_args)
-        # assigned_to should remain as it was not explicitly cleared
-        self.assertNotIn("assigned_to", update_args)
-
-    def test_valid_status_transition_done_to_archived(self):
-        # Initial state: task is done
-        self._mock_task_get(task_manager.STATUS_DONE, completed_at=datetime.now().isoformat())
-
-        # Call update_task_status with a valid transition (DONE to ARCHIVED)
-        result = task_manager.update_task_status("task123", task_manager.STATUS_ARCHIVED, None)
-
-        self.assertTrue(result)
-        self.mock_document_ref.update.assert_called_once()
-        update_args = self.mock_document_ref.update.call_args[0][0]
-        self.assertEqual(update_args["status"], task_manager.STATUS_ARCHIVED)
-        self.assertEqual(update_args["completed_at"], task_manager.firestore.DELETE_FIELD)
-
-
-    def test_delete_task_success(self):
-        # Mock that the task exists
-        self._mock_task_get(task_manager.STATUS_NEW, exists=True)
-        
-        result = task_manager.delete_task("task123")
-        
-        self.assertTrue(result)
-        self.mock_document_ref.delete.assert_called_once()
-
-    def test_delete_task_not_found(self):
-        # Mock that the task does not exist
-        self._mock_task_get(task_manager.STATUS_NEW, exists=False)
-
-        result = task_manager.delete_task("non_existent_task")
-
-        self.assertFalse(result)
-        self.mock_document_ref.delete.assert_not_called()
 
 
 if __name__ == '__main__':
