@@ -69,20 +69,50 @@ def get_task_by_id(task_id: str) -> Dict[str, Any] | None:
         return doc.to_dict()
     return None
 
+def delete_task(task_id: str) -> bool:
+    """Deletes a task by its unique ID."""
+    db = firestore.client()
+    doc_ref = db.collection(TASKS_COLLECTION).document(task_id)
+    doc = doc_ref.get()
+    if doc.exists:
+        doc_ref.delete()
+        return True
+    return False
+
 def update_task_status(task_id: str, new_status: str, user_info: Any) -> bool:
     """Updates the status of a task and who it's assigned to."""
     db = firestore.client()
     doc_ref = db.collection(TASKS_COLLECTION).document(task_id)
     doc = doc_ref.get()
     if doc.exists:
-        update_data = {"status": new_status}
+        current_task = doc.to_dict()
+        current_status = current_task.get("status")
+        update_data = {}
+
+        # Define allowed transitions
+        allowed_transitions = {
+            STATUS_NEW: [STATUS_IN_PROGRESS, STATUS_ARCHIVED],
+            STATUS_IN_PROGRESS: [STATUS_NEW, STATUS_DONE, STATUS_ARCHIVED],
+            STATUS_DONE: [STATUS_IN_PROGRESS, STATUS_ARCHIVED],
+            STATUS_ARCHIVED: [] # Archived tasks cannot change status
+        }
+
+        if new_status not in allowed_transitions.get(current_status, []):
+            print(f"Invalid status transition from {current_status} to {new_status} for task {task_id}")
+            return False
+
+        update_data["status"] = new_status
+
         if new_status == STATUS_IN_PROGRESS and user_info:
             update_data["assigned_to"] = f"{user_info.first_name} (@{user_info.username})"
+        elif new_status == STATUS_NEW:
+            # If moving back to NEW, clear assigned_to
+            update_data["assigned_to"] = firestore.DELETE_FIELD
         
         if new_status == STATUS_DONE:
             update_data["completed_at"] = datetime.now().isoformat()
-        elif doc.to_dict().get("status") == STATUS_DONE and new_status != STATUS_DONE:
-            # If status is changing from DONE to something else, remove completed_at
+        elif current_status == STATUS_DONE and new_status != STATUS_DONE:
+            # If status is changing from DONE to something else (e.g., IN_PROGRESS), remove completed_at
             update_data["completed_at"] = firestore.DELETE_FIELD
             
         doc_ref.update(update_data)

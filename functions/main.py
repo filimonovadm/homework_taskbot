@@ -24,14 +24,17 @@ def get_task_keyboard(task_id: str, status: str):
     """Создает инлайн-клавиатуру для задачи в зависимости от ее статуса."""
     keyboard = types.InlineKeyboardMarkup()
     if status == task_manager.STATUS_NEW:
-        button = types.InlineKeyboardButton("Взять в работу", callback_data=f"take_{task_id}")
-        keyboard.add(button)
+        button_take = types.InlineKeyboardButton("Взять в работу", callback_data=f"take_{task_id}")
+        button_delete = types.InlineKeyboardButton("❌ Удалить", callback_data=f"delete_{task_id}")
+        keyboard.add(button_take, button_delete)
     elif status == task_manager.STATUS_IN_PROGRESS:
-        button = types.InlineKeyboardButton("✅ Завершить", callback_data=f"done_{task_id}")
-        keyboard.add(button)
+        button_done = types.InlineKeyboardButton("✅ Завершить", callback_data=f"done_{task_id}")
+        button_reopen_new = types.InlineKeyboardButton("🔄 Отменить", callback_data=f"reopen_new_{task_id}")
+        keyboard.add(button_done, button_reopen_new)
     elif status == task_manager.STATUS_DONE:
-        button = types.InlineKeyboardButton("🗄️ Архивировать", callback_data=f"archive_{task_id}")
-        keyboard.add(button)
+        button_archive = types.InlineKeyboardButton("🗄️ Архивировать", callback_data=f"archive_{task_id}")
+        button_reopen_in_progress = types.InlineKeyboardButton("⏪ Вернуть в работу", callback_data=f"reopen_in_progress_{task_id}")
+        keyboard.add(button_archive, button_reopen_in_progress)
     return keyboard
 
 def format_task_message(task: dict) -> str:
@@ -95,7 +98,10 @@ def send_welcome_and_help(bot, message):
         "  - `архивирована`: Задача завершена и перемещена в архив.\n\n"
         "*Взаимодействие с задачами (инлайн-кнопки под задачами):*\n"
         "  - *Взять в работу*: Появляется у *новых* задач. Назначит задачу вам и изменит статус на `в работе`.\n"
+        "  - *Удалить*: Появляется у *новых* задач. Полностью удаляет задачу.\n"
         "  - *Завершить*: Появляется у задач `в работе`. Отметит задачу как `выполненную`.\n"
+        "  - *Отменить*: Появляется у задач `в работе`. Вернет задачу в статус `новая`.\n"
+        "  - *Вернуть в работу*: Появляется у задач `выполнена`. Вернет задачу в статус `в работе`.\n"
         "  - *Архивировать*: Появляется у *выполненных* задач. Переместит задачу в архив.\n\n"
         "*Другие команды:*\n"
         "  - `/new <описание задачи>`: Быстрое создание новой задачи (без интерактивного режима).\n"
@@ -174,6 +180,19 @@ def handle_callback_query(bot, call):
             new_status = task_manager.STATUS_DONE
         elif action == "archive":
             new_status = task_manager.STATUS_ARCHIVED
+        elif action == "reopen_new":
+            new_status = task_manager.STATUS_NEW
+        elif action == "reopen_in_progress":
+            new_status = task_manager.STATUS_IN_PROGRESS
+        elif action == "delete":
+            success = task_manager.delete_task(task_id)
+            if success:
+                bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, 
+                                      text="Задача успешно удалена.", parse_mode='Markdown')
+                bot.answer_callback_query(call.id, "Задача удалена.")
+            else:
+                bot.answer_callback_query(call.id, "Не удалось удалить задачу.")
+            return # Exit after deleting
 
         if not new_status:
             bot.answer_callback_query(call.id, "Неизвестное действие.")
