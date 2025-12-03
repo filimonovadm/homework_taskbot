@@ -125,7 +125,7 @@ def add_new_task(bot, message):
         bot.reply_to(message, "Пожалуйста, укажите текст задачи после команды. Например: `/new Купить молоко`", reply_markup=get_main_keyboard())
         return
     try:
-        new_task = task_manager.add_task(task_text)
+        new_task = task_manager.add_task(message.chat.id, task_text)
         reply_text = format_task_message(new_task)
         keyboard = get_task_keyboard(new_task['id'], new_task['status'])
         bot.send_message(message.chat.id, reply_text, parse_mode='Markdown', reply_markup=keyboard)
@@ -136,20 +136,21 @@ def add_new_task(bot, message):
 def show_tasks(bot, message, status: str | None = None):
     """Показывает список задач, опционально фильтруя по статусу."""
     try:
+        chat_id = message.chat.id
         if status == "open":
-            tasks_to_show = task_manager.get_tasks(status="open")
+            tasks_to_show = task_manager.get_tasks(chat_id, status="open")
             header_text = "🔥 *Новые задачи: *"
             no_tasks_text = "Новых задач нет. Отличная работа! ✨"
         elif status == task_manager.STATUS_ARCHIVED:
-            tasks_to_show = task_manager.get_tasks(status=task_manager.STATUS_ARCHIVED)
+            tasks_to_show = task_manager.get_tasks(chat_id, status=task_manager.STATUS_ARCHIVED)
             header_text = "🗄️ *Архивные задачи: *"
             no_tasks_text = "Архивных задач нет. ✨"
         elif status:
-            tasks_to_show = task_manager.get_tasks(status=status)
+            tasks_to_show = task_manager.get_tasks(chat_id, status=status)
             header_text = f"🔥 *Задачи со статусом '{status}':*"
             no_tasks_text = f"Нет задач со статусом '{status}'. Отличная работа! ✨"
         else:
-            tasks_to_show = task_manager.get_all_tasks() # This will use get_tasks(None) from task_manager
+            tasks_to_show = task_manager.get_all_tasks(chat_id) # This will use get_tasks(None) from task_manager
             header_text = "🔥 *Все задачи: *"
             no_tasks_text = "Нет задач. Отличная работа! ✨"
             
@@ -269,7 +270,7 @@ def webhook(req: https_fn.Request) -> https_fn.Response:
                         return
 
                     try:
-                        new_task = task_manager.add_task(task_text)
+                        new_task = task_manager.add_task(user_id, task_text)
                         reply_text = format_task_message(new_task)
                         keyboard = get_task_keyboard(new_task['id'], new_task['status'])
                         bot.send_message(user_id, "Задача успешно создана!", reply_markup=get_main_keyboard())

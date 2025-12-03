@@ -1,6 +1,6 @@
 import unittest
 from unittest.mock import patch, MagicMock
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import sys
 import os
 
@@ -13,18 +13,21 @@ import task_manager
 class TestMain(unittest.TestCase):
 
     def test_format_task_message_with_created_at(self):
-        # Create a mock task with a created_at timestamp
-        test_datetime = datetime(2023, 1, 15, 10, 30, 0)
+        # Create a mock task with a created_at timestamp in UTC
+        utc_datetime = datetime(2023, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
         mock_task = {
             "id": "123",
             "text": "Test Task",
             "status": task_manager.STATUS_NEW,
             "created_by": None,
             "assigned_to": None,
-            "created_at": test_datetime.isoformat()
+            "created_at": utc_datetime.isoformat()
         }
         
-        expected_date_str = test_datetime.strftime('%d.%m.%Y %H:%M')
+        # Calculate the expected time in Moscow Time (UTC+3)
+        moscow_tz = timezone(timedelta(hours=3))
+        expected_local_datetime = utc_datetime.astimezone(moscow_tz)
+        expected_date_str = expected_local_datetime.strftime('%d.%m.%Y %H:%M')
         expected_output_part = f"\n`Дата создания: {expected_date_str}`"
 
         formatted_message = main.format_task_message(mock_task)

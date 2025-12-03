@@ -26,12 +26,13 @@ def get_user_state(user_id: int) -> Dict[str, Any] | None:
         return doc.to_dict()
     return None
 
-def add_task(text: str) -> Dict[str, Any]:
-    """Adds a new task to the Firestore collection."""
+def add_task(chat_id: int, text: str) -> Dict[str, Any]:
+    """Adds a new task to the Firestore collection for a specific chat."""
     db = firestore.client()
     task_id = str(uuid.uuid4())
     new_task = {
         "id": task_id,
+        "chat_id": chat_id,
         "text": text,
         "status": STATUS_NEW,
         "created_by": None,
@@ -41,12 +42,13 @@ def add_task(text: str) -> Dict[str, Any]:
     db.collection(TASKS_COLLECTION).document(task_id).set(new_task)
     return new_task
 
-def get_tasks(status: str | None = None) -> List[Dict[str, Any]]:
-    """Returns a list of tasks, optionally filtered by status or for open tasks."""
+def get_tasks(chat_id: int, status: str | None = None) -> List[Dict[str, Any]]:
+    """Returns a list of tasks for a specific chat, optionally filtered by status."""
     db = firestore.client()
     tasks = []
     
-    query = db.collection(TASKS_COLLECTION)
+    query = db.collection(TASKS_COLLECTION).where("chat_id", "==", chat_id)
+    
     if status == "open": # For "Открытые задачи"
         query = query.where("status", "==", STATUS_NEW)
     elif status: # For specific statuses like "в работе", "выполнена", "архивирована"
@@ -57,9 +59,9 @@ def get_tasks(status: str | None = None) -> List[Dict[str, Any]]:
         tasks.append(doc.to_dict())
     return tasks
 
-def get_all_tasks() -> List[Dict[str, Any]]:
-    """Returns all tasks, regardless of status."""
-    return get_tasks(status=None)
+def get_all_tasks(chat_id: int) -> List[Dict[str, Any]]:
+    """Returns all tasks for a specific chat, regardless of status."""
+    return get_tasks(chat_id=chat_id, status=None)
 
 def get_task_by_id(task_id: str) -> Dict[str, Any] | None:
     """Finds a task by its unique ID."""
