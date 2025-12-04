@@ -16,8 +16,9 @@ import task_manager
 
 class TestAddTask(unittest.TestCase):
 
+    @patch('task_manager.get_next_task_number', return_value=42)
     @patch('task_manager.firestore.client')
-    def test_add_task_initializes_correctly(self, mock_firestore_client):
+    def test_add_task_initializes_correctly(self, mock_firestore_client, mock_get_next_number):
         # Mock the Firestore client and its methods
         mock_db = MagicMock()
         mock_collection = MagicMock()
@@ -33,18 +34,21 @@ class TestAddTask(unittest.TestCase):
         new_task = task_manager.add_task(chat_id, task_text, created_by_user)
 
         # Assertions on the returned dictionary
+        self.assertEqual(new_task['task_number'], 42)
         self.assertIn('created_at', new_task)
         self.assertEqual(new_task['chat_id'], chat_id)
         self.assertEqual(new_task['text'], task_text)
         self.assertEqual(new_task['status'], task_manager.STATUS_NEW)
-        self.assertEqual(new_task['accumulated_time_seconds'], 0) # Key assertion for new field
+        self.assertEqual(new_task['accumulated_time_seconds'], 0)
         self.assertEqual(new_task['created_by'], created_by_user)
+        mock_get_next_number.assert_called_once_with(chat_id)
 
         # Verify that set was called with the correct data
         mock_document.set.assert_called_once()
         called_args, _ = mock_document.set.call_args
         set_data = called_args[0]
         
+        self.assertEqual(set_data['task_number'], 42)
         self.assertEqual(set_data['text'], task_text)
         self.assertEqual(set_data['chat_id'], chat_id)
         self.assertEqual(set_data['status'], task_manager.STATUS_NEW)

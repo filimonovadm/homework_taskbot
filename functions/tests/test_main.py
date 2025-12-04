@@ -53,6 +53,27 @@ class TestMain(unittest.TestCase):
         self.assertIn(task_manager.STATUS_DONE, formatted_message)
         self.assertIn(mock_task['assigned_to'], formatted_message)
 
+    def test_format_task_message_with_task_number(self):
+        """Tests that the task number is formatted correctly if it exists."""
+        mock_task = {
+            "id": "123",
+            "text": "Numbered Task",
+            "status": task_manager.STATUS_NEW,
+            "task_number": 42
+        }
+        formatted_message = main.format_task_message(mock_task)
+        self.assertIn("*(Задача #42)*", formatted_message)
+
+    def test_format_task_message_without_task_number(self):
+        """Tests that the task number is not shown if it doesn't exist."""
+        mock_task = {
+            "id": "456",
+            "text": "Unnumbered Task",
+            "status": task_manager.STATUS_IN_PROGRESS
+        }
+        formatted_message = main.format_task_message(mock_task)
+        self.assertNotIn("Задача #", formatted_message)
+
 @patch('main.task_manager')
 @patch('main.telebot')
 @patch('main.https_fn')
@@ -82,6 +103,8 @@ class TestWebhookLogic(unittest.TestCase):
 
     def test_show_tasks_deletes_old_messages(self, mock_https_fn, mock_telebot, mock_task_manager):
         """Verify that show_tasks cleans up previous messages."""
+        mock_telebot.reset_mock()
+        mock_task_manager.reset_mock()
         # Arrange
         chat_id = 123
         user_message_id = 100
@@ -116,6 +139,84 @@ class TestWebhookLogic(unittest.TestCase):
         mock_task_manager.set_user_state.assert_called_once()
         _, kwargs = mock_task_manager.set_user_state.call_args
         self.assertEqual(kwargs['data']['last_task_list_message_ids'], [201, 202])
+
+    def test_awaiting_description_saves_message_ids(self, mock_https_fn, mock_telebot, mock_task_manager):
+        """Verify the add_task flow saves the new message IDs for future cleanup."""
+        mock_telebot.reset_mock()
+        mock_task_manager.reset_mock()
+        # Arrange
+        chat_id = 789
+        user_reply_message_id = 301
+        
+        mock_bot = mock_telebot.TeleBot.return_value
+        self._create_mock_update("Новая тестовая задача", chat_id=chat_id, message_id=user_reply_message_id)
+        
+        # Set the state as if the user was prompted to create a task
+        mock_task_manager.get_user_state.return_value = {"state": "awaiting_task_description", "data": {}}
+        
+        # Mock the return values of creating and formatting a task
+        mock_task_manager.add_task.return_value = {"id": "xyz", "text": "Новая тестовая задача", "status": "новая"}
+        
+        # Mock the bot sending messages, returning mock message objects with IDs
+        mock_bot.send_message.side_effect = [
+            MagicMock(message_id=401), # Confirmation message
+            MagicMock(message_id=402)  # Task detail message
+        ]
+
+        # Act
+        mock_request = MagicMock()
+        mock_request.method = "POST"
+        main.webhook(mock_request)
+
+        # Assert
+        # 1. User's reply message is deleted
+        mock_bot.delete_message.assert_called_with(chat_id=chat_id, message_id=user_reply_message_id)
+
+        # 2. Two new messages are sent
+        self.assertEqual(mock_bot.send_message.call_count, 2)
+
+        # 3. State is updated with the new message IDs
+        mock_task_manager.set_user_state.assert_called_once()
+        args, kwargs = mock_task_manager.set_user_state.call_args
+        self.assertEqual(kwargs['data']['last_task_list_message_ids'], [401, 402])
+        self.assertEqual(args[1], 'idle')
+
+    def test_new_command_sends_keyboard(self, mock_https_fn, mock_telebot, mock_task_manager):
+        """Verify that /new command sends the main keyboard and saves message IDs."""
+        mock_telebot.reset_mock()
+        mock_task_manager.reset_mock()
+        # Arrange
+        chat_id = 123
+        user_message_id = 100
+
+        mock_bot = mock_telebot.TeleBot.return_value
+        self._create_mock_update("/new Test task", chat_id=chat_id, message_id=user_message_id)
+        
+        mock_task_manager.get_user_state.return_value = {"state": "idle", "data": {}}
+        mock_task_manager.add_task.return_value = {"id": "task1", "text": "Test task", "status": "новая"}
+        
+        # Mock the bot sending messages
+        mock_bot.send_message.side_effect = [
+            MagicMock(message_id=501), # Confirmation message ("Задача успешно создана!")
+            MagicMock(message_id=502)  # Task message
+        ]
+
+        # Act
+        mock_request = MagicMock()
+        mock_request.method = "POST"
+        main.webhook(mock_request)
+
+        # Assert
+        # Check that the main menu message is sent with the keyboard
+        mock_bot.send_message.assert_any_call(chat_id, "Задача успешно создана!", reply_markup=ANY)
+        
+        # Check that both messages were sent
+        self.assertEqual(mock_bot.send_message.call_count, 2)
+        
+        # Check that the state is updated with the IDs of both messages
+        mock_task_manager.set_user_state.assert_called_once()
+        _, kwargs = mock_task_manager.set_user_state.call_args
+        self.assertEqual(kwargs['data']['last_task_list_message_ids'], [501, 502])
 
 if __name__ == '__main__':
     unittest.main()

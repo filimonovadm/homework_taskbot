@@ -5,6 +5,7 @@ from typing import List, Dict, Any
 
 TASKS_COLLECTION = "tasks"
 USER_STATES_COLLECTION = "user_states"
+CHAT_COUNTERS_COLLECTION = "chat_counters"
 
 # Status constants
 STATUS_NEW = "новая"
@@ -26,13 +27,33 @@ def get_user_state(user_id: int) -> Dict[str, Any] | None:
         return doc.to_dict()
     return None
 
+@firestore.transactional
+def _get_next_task_number_transaction(transaction, counter_ref):
+    """Transaction to get and increment the task number."""
+    snapshot = counter_ref.get(transaction=transaction)
+    current_number = snapshot.get("count") if snapshot.exists else 0
+    next_number = current_number + 1
+    transaction.set(counter_ref, {"count": next_number})
+    return next_number
+
+def get_next_task_number(chat_id: int) -> int:
+    """
+    Gets the next available task number for a given chat, incrementing it atomically.
+    """
+    db = firestore.client()
+    counter_ref = db.collection(CHAT_COUNTERS_COLLECTION).document(str(chat_id))
+    transaction = db.transaction()
+    return _get_next_task_number_transaction(transaction, counter_ref)
+
 def add_task(chat_id: int, text: str, created_by: str) -> Dict[str, Any]:
     """Adds a new task to the Firestore collection for a specific chat."""
     db = firestore.client()
     task_id = str(uuid.uuid4())
+    task_number = get_next_task_number(chat_id)
     new_task = {
         "id": task_id,
         "chat_id": chat_id,
+        "task_number": task_number,
         "text": text,
         "status": STATUS_NEW,
         "created_by": created_by,

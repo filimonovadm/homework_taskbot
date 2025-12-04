@@ -77,7 +77,10 @@ def format_task_message(task: dict) -> str:
         task_manager.STATUS_IN_PROGRESS: "👨‍💻",
         task_manager.STATUS_DONE: "✅"
     }
-    text = f"""{status_emoji.get(task['status'], '')} *{task['text']}*
+
+    task_number_str = f"*(Задача #{task['task_number']})* " if task.get('task_number') else ""
+    
+    text = f"""{status_emoji.get(task['status'], '')} {task_number_str}*{task['text']}*
 `Статус: {task['status']}`"""
 
     if task.get('assigned_to'):
@@ -132,8 +135,25 @@ def get_main_keyboard():
     return keyboard
 
 def send_welcome_and_help(bot, message):
-    """Отправляет приветственное сообщение и справку по командам."""
-    print("send_welcome_and_help function called")
+    """Отправляет приветственное сообщение и справку по командам, очищая предыдущие сообщения."""
+    chat_id = message.chat.id
+    new_message_ids = []
+
+    # 1. Clean up old messages
+    chat_state = task_manager.get_user_state(chat_id) or {}
+    old_message_ids = chat_state.get("data", {}).get("last_task_list_message_ids", [])
+    if old_message_ids:
+        for msg_id in old_message_ids:
+            try:
+                bot.delete_message(chat_id, msg_id)
+            except Exception as e:
+                print(f"Could not delete message {msg_id}: {e}")
+    try:
+        bot.delete_message(chat_id, message.message_id)
+    except Exception as e:
+        print(f"Could not delete user command message: {e}")
+
+    # 2. Send the help message
     help_text = (
         "Привет! Я бот для учета домашних дел. Вот что я умею:\n\n"
         "*Основные кнопки (под полем ввода сообщения):*\n"
@@ -161,31 +181,68 @@ def send_welcome_and_help(bot, message):
         "Нажмите одну из кнопок, чтобы начать!"
     )
     try:
-        bot.reply_to(message, help_text, parse_mode='Markdown', reply_markup=get_main_keyboard())
-        print("Successfully sent reply.")
+        sent_msg = bot.send_message(chat_id, help_text, parse_mode='Markdown', reply_markup=get_main_keyboard())
+        new_message_ids.append(sent_msg.message_id)
     except Exception as e:
         print(f"Error sending reply: {e}")
+        err_msg = bot.send_message(chat_id, "Произошла ошибка при отображении справки.", reply_markup=get_main_keyboard())
+        new_message_ids.append(err_msg.message_id)
+    
+    # 3. Save the new message ID to state
+    current_data = chat_state.get("data", {})
+    current_data['last_task_list_message_ids'] = new_message_ids
+    task_manager.set_user_state(chat_id, "idle", data=current_data)
 
 def add_new_task(bot, message):
-    """Добавляет новую задачу и отправляет ее с клавиатурой."""
+    """Добавляет новую задачу и отправляет ее с клавиатурой, участвуя в очистке чата."""
+    chat_id = message.chat.id
+    new_message_ids = []
+
+    # 1. Clean up old messages
+    chat_state = task_manager.get_user_state(chat_id) or {}
+    old_message_ids = chat_state.get("data", {}).get("last_task_list_message_ids", [])
+    if old_message_ids:
+        for msg_id in old_message_ids:
+            try:
+                bot.delete_message(chat_id, msg_id)
+            except Exception as e:
+                print(f"Could not delete message {msg_id}: {e}")
+    
+    try:
+        bot.delete_message(chat_id, message.message_id)
+    except Exception as e:
+        print(f"Could not delete user command message: {e}")
+
     try:
         task_text = message.text.split(maxsplit=1)[1]
     except IndexError:
         task_text = ""
 
     if not task_text:
-        bot.reply_to(message, "Пожалуйста, укажите текст задачи после команды. Например: `/new Купить молоко`", reply_markup=get_main_keyboard())
-        return
-    try:
-        user_info = message.from_user
-        created_by_user = f"@{user_info.username}" if user_info.username else user_info.first_name or "Unknown User"
-        new_task = task_manager.add_task(message.chat.id, task_text, created_by=created_by_user)
-        reply_text = format_task_message(new_task)
-        keyboard = get_task_keyboard(new_task['id'], new_task['status'])
-        bot.send_message(message.chat.id, reply_text, parse_mode='Markdown', reply_markup=keyboard)
-    except Exception as e:
-        print(f"Ошибка при добавлении задачи: {e}")
-        bot.reply_to(message, "Произошла ошибка при добавлении задачи.", reply_markup=get_main_keyboard())
+        sent_msg = bot.send_message(chat_id, "Пожалуйста, укажите текст задачи после команды. Например: `/new Купить молоко`", reply_markup=get_main_keyboard())
+        new_message_ids.append(sent_msg.message_id)
+    else:
+        try:
+            user_info = message.from_user
+            created_by_user = f"@{user_info.username}" if user_info.username else user_info.first_name or "Unknown User"
+            new_task = task_manager.add_task(chat_id, task_text, created_by=created_by_user)
+            reply_text = format_task_message(new_task)
+            keyboard = get_task_keyboard(new_task['id'], new_task['status'])
+
+            # Send "Success" message with the main keyboard, then the task with its inline keyboard
+            msg1 = bot.send_message(chat_id, "Задача успешно создана!", reply_markup=get_main_keyboard())
+            msg2 = bot.send_message(chat_id, reply_text, parse_mode='Markdown', reply_markup=keyboard)
+            new_message_ids.extend([msg1.message_id, msg2.message_id])
+
+        except Exception as e:
+            print(f"Ошибка при добавлении задачи: {e}")
+            err_msg = bot.send_message(chat_id, "Произошла ошибка при добавлении задачи.", reply_markup=get_main_keyboard())
+            new_message_ids.append(err_msg.message_id)
+            
+    # Finally, save the new message IDs to the user's state
+    final_data = chat_state.get("data", {})
+    final_data['last_task_list_message_ids'] = new_message_ids
+    task_manager.set_user_state(chat_id, "idle", data=final_data)
 
 def show_tasks(bot, message, status: str | None = None):
     """Показывает список задач, опционально фильтруя по статусу. Удаляет предыдущий список задач."""
@@ -357,32 +414,79 @@ def webhook(req: https_fn.Request) -> https_fn.Response:
                 user_state = task_manager.get_user_state(user_id)
 
                 if user_state and user_state.get("state") == "awaiting_task_description":
-                    task_text = update.message.text
-                    if not task_text:
-                        bot.send_message(user_id, "Описание задачи не может быть пустым. Пожалуйста, попробуйте еще раз.", reply_markup=get_main_keyboard())
-                        task_manager.set_user_state(user_id, "idle") # Clear state
-                        return
+                    # This is the handler for when the user provides the task description.
+                    
+                    # First, clean up the "Пожалуйста, введите..." prompt message.
+                    chat_state = user_state or {}
+                    old_message_ids = chat_state.get("data", {}).get("last_task_list_message_ids", [])
+                    if old_message_ids:
+                        for msg_id in old_message_ids:
+                            try:
+                                bot.delete_message(user_id, msg_id)
+                            except Exception as e:
+                                print(f"Could not delete message {msg_id}: {e}")
 
+                    task_text = update.message.text
+                    new_message_ids = []
+                    
                     try:
-                        user_info = update.message.from_user
-                        created_by_user = f"@{user_info.username}" if user_info.username else user_info.first_name or "Unknown User"
-                        new_task = task_manager.add_task(user_id, task_text, created_by=created_by_user)
-                        reply_text = format_task_message(new_task)
-                        keyboard = get_task_keyboard(new_task['id'], new_task['status'])
-                        bot.send_message(user_id, "Задача успешно создана!", reply_markup=get_main_keyboard())
-                        bot.send_message(user_id, reply_text, parse_mode='Markdown', reply_markup=keyboard)
-                    except Exception as e:
-                        print(f"Ошибка при добавлении задачи через кнопку: {e}")
-                        bot.send_message(user_id, "Произошла ошибка при создании задачи.", reply_markup=get_main_keyboard())
-                    finally:
-                        task_manager.set_user_state(user_id, "idle") # Clear state
-                    return # Important: stop processing after handling the state
+                        # Also delete the user's message with the description
+                        bot.delete_message(chat_id=user_id, message_id=update.message.message_id)
+                    except Exception: pass
+
+                    if not task_text:
+                        msg = bot.send_message(user_id, "Описание задачи не может быть пустым. Пожалуйста, попробуйте еще раз.", reply_markup=get_main_keyboard())
+                        new_message_ids.append(msg.message_id)
+                    else:
+                        try:
+                            user_info = update.message.from_user
+                            created_by_user = f"@{user_info.username}" if user_info.username else user_info.first_name or "Unknown User"
+                            new_task = task_manager.add_task(user_id, task_text, created_by=created_by_user)
+                            reply_text = format_task_message(new_task)
+                            keyboard = get_task_keyboard(new_task['id'], new_task['status'])
+                            
+                            msg1 = bot.send_message(user_id, "Задача успешно создана!", reply_markup=get_main_keyboard())
+                            msg2 = bot.send_message(user_id, reply_text, parse_mode='Markdown', reply_markup=keyboard)
+                            new_message_ids.extend([msg1.message_id, msg2.message_id])
+                        except Exception as e:
+                            print(f"Ошибка при добавлении задачи через кнопку: {e}")
+                            err_msg = bot.send_message(user_id, "Произошла ошибка при создании задачи.", reply_markup=get_main_keyboard())
+                            new_message_ids.append(err_msg.message_id)
+                    
+                    # Save the IDs of the messages just sent, so the next command can clean them up.
+                    final_state = task_manager.get_user_state(user_id) or {}
+                    final_data = final_state.get("data", {})
+                    final_data['last_task_list_message_ids'] = new_message_ids
+                    task_manager.set_user_state(user_id, "idle", data=final_data)
+                    
+                    return
 
                 if update.message.text.startswith("/start") or update.message.text.startswith("/help"):
                     send_welcome_and_help(bot, update.message)
                 elif update.message.text == "Создать задачу":
-                    bot.send_message(user_id, "Пожалуйста, введите описание задачи:", reply_markup=get_main_keyboard())
-                    task_manager.set_user_state(user_id, "awaiting_task_description")
+                    # Clean up previous messages first
+                    chat_state = task_manager.get_user_state(user_id) or {}
+                    old_message_ids = chat_state.get("data", {}).get("last_task_list_message_ids", [])
+                    
+                    if old_message_ids:
+                        for msg_id in old_message_ids:
+                            try:
+                                bot.delete_message(user_id, msg_id)
+                            except Exception as e:
+                                print(f"Could not delete message {msg_id}: {e}")
+
+                    try:
+                        bot.delete_message(user_id, update.message.message_id)
+                    except Exception as e:
+                        print(f"Could not delete user command message: {e}")
+
+                    # Now, proceed with the original logic
+                    sent_msg = bot.send_message(user_id, "Пожалуйста, введите описание задачи:", reply_markup=get_main_keyboard())
+                    
+                    # Store the ID of this prompt message so it can be cleaned up by the next action.
+                    current_data = chat_state.get("data", {})
+                    current_data['last_task_list_message_ids'] = [sent_msg.message_id]
+                    task_manager.set_user_state(user_id, "awaiting_task_description", data=current_data)
                 elif update.message.text == "Открытые задачи":
                     show_tasks(bot, update.message, status="open")
                 elif update.message.text == "Задачи в работе":
