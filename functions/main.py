@@ -155,6 +155,12 @@ def send_welcome_and_help(bot, message):
             except Exception as e:
                 print(f"Could not delete message {msg_id}: {e}")
 
+    # Also delete the user's command message that triggered this
+    try:
+        bot.delete_message(chat_id, message.message_id)
+    except Exception as e:
+        print(f"Could not delete user command message: {e}")
+
     # 2. Send the help message
     help_text = (
         "Привет! Я бот для учета домашних дел. Вот что я умею:\n\n"
