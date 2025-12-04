@@ -11,6 +11,34 @@ from telegram_bot_calendar import DetailedTelegramCalendar, LSTEP
 # Define a timezone for UTC+3 (Moscow time for example)
 MOSCOW_TZ = timezone(timedelta(hours=3))
 
+# --- Constants ---
+HELP_TEXT = (
+    "Привет! Я бот для учета домашних дел. Вот что я умею:\n\n"
+    "*Основные кнопки (под полем ввода сообщения):*\n"
+    "  - *Создать задачу*: Позволяет быстро добавить новую задачу.\n"
+    "  - *Открытые задачи*: Показывает список всех *новых* задач, ожидающих начала работы.\n"
+    "  - *Задачи в работе*: Показывает задачи, которые сейчас выполняются.\n"
+    "  - *Задачи выполненные*: Показывает задачи, которые были успешно завершены.\n"
+    "  - *Архивные задачи*: Показывает задачи, которые были заархивированы после завершения.\n"
+    "  - *Помощь*: Отображает это справочное сообщение.\n\n"
+    "*Статусы задач:*\n"
+    "  - `новая`: Задача только что создана, никто еще не начал ее выполнять.\n"
+    "  - `в работе`: Задача активно выполняется.\n"
+    "  - `выполнена`: Задача успешно завершена.\n"
+    "  - `архивирована`: Задача завершена и перемещена в архив.\n\n"
+    "*Взаимодействие с задачами (инлайн-кнопки под задачами):*\n"
+    "  - *Взять в работу*: Появляется у *новых* задач. Назначит задачу вам и изменит статус на `в работе`.\n"
+    "  - *Удалить*: Появляется у *новых* задач. Полностью удаляет задачу.\n"
+    "  - *Завершить*: Появляется у задач `в работе`. Отметит задачу как `выполненную`.\n"
+    "  - *Отменить*: Появляется у задач `в работе`. Вернет задачу в статус `новая`.\n"
+    "  - *Вернуть в работу*: Появляется у задач `выполнена`. Вернет задачу в статус `в работе`.\n"
+    "  - *Архивировать*: Появляется у *выполненных* задач. Переместит задачу в архив.\n\n"
+    "*Другие команды:*\n"
+    "  - `/new <описание задачи>`: Быстрое создание новой задачи (без интерактивного режима).\n"
+    "  - `/start` или `/help`: Вызывает это приветственное сообщение.\n\n"
+    "Нажмите одну из кнопок, чтобы начать!"
+)
+
 def convert_utc_to_local(utc_dt: datetime) -> datetime:
     """Converts a UTC datetime object to Moscow timezone (UTC+3)."""
     return utc_dt.replace(tzinfo=timezone.utc).astimezone(MOSCOW_TZ)
@@ -140,6 +168,40 @@ def get_main_keyboard():
     keyboard.add(button_archived_tasks, button_help)
     return keyboard
 
+def handle_start_command(bot, message):
+    """
+    Handles the /start command.
+    Sends a fresh welcome message and resets the message state. It cleans up the
+    bot's previous messages but intentionally avoids deleting the user's own
+    /start message to prevent timeouts in scenarios like a cleared chat.
+    """
+    chat_id = message.chat.id
+    new_message_ids = []
+
+    # Clean up the bot's previous messages.
+    chat_state = task_manager.get_user_state(chat_id) or {}
+    old_message_ids = chat_state.get("data", {}).get("last_task_list_message_ids", [])
+    if old_message_ids:
+        for msg_id in old_message_ids:
+            try:
+                bot.delete_message(chat_id, msg_id)
+            except Exception as e:
+                print(f"Could not delete message {msg_id}: {e}")
+
+    # Send the welcome message
+    try:
+        sent_msg = bot.send_message(chat_id, HELP_TEXT, parse_mode='Markdown', reply_markup=get_main_keyboard())
+        new_message_ids.append(sent_msg.message_id)
+    except Exception as e:
+        print(f"Error sending reply: {e}")
+        err_msg = bot.send_message(chat_id, "Произошла ошибка при отображении справки.", reply_markup=get_main_keyboard())
+        new_message_ids.append(err_msg.message_id)
+
+    # Overwrite the state with the new message ID, effectively resetting it.
+    current_data = chat_state.get("data", {})
+    current_data['last_task_list_message_ids'] = new_message_ids
+    task_manager.set_user_state(chat_id, "idle", data=current_data)
+
 def send_welcome_and_help(bot, message):
     """Отправляет приветственное сообщение и справку по командам, очищая предыдущие сообщения."""
     chat_id = message.chat.id
@@ -162,34 +224,8 @@ def send_welcome_and_help(bot, message):
         print(f"Could not delete user command message: {e}")
 
     # 2. Send the help message
-    help_text = (
-        "Привет! Я бот для учета домашних дел. Вот что я умею:\n\n"
-        "*Основные кнопки (под полем ввода сообщения):*\n"
-        "  - *Создать задачу*: Позволяет быстро добавить новую задачу.\n"
-        "  - *Открытые задачи*: Показывает список всех *новых* задач, ожидающих начала работы.\n"
-        "  - *Задачи в работе*: Показывает задачи, которые сейчас выполняются.\n"
-        "  - *Задачи выполненные*: Показывает задачи, которые были успешно завершены.\n"
-        "  - *Архивные задачи*: Показывает задачи, которые были заархивированы после завершения.\n"
-        "  - *Помощь*: Отображает это справочное сообщение.\n\n"
-        "*Статусы задач:*\n"
-        "  - `новая`: Задача только что создана, никто еще не начал ее выполнять.\n"
-        "  - `в работе`: Задача активно выполняется.\n"
-        "  - `выполнена`: Задача успешно завершена.\n"
-        "  - `архивирована`: Задача завершена и перемещена в архив.\n\n"
-        "*Взаимодействие с задачами (инлайн-кнопки под задачами):*\n"
-        "  - *Взять в работу*: Появляется у *новых* задач. Назначит задачу вам и изменит статус на `в работе`.\n"
-        "  - *Удалить*: Появляется у *новых* задач. Полностью удаляет задачу.\n"
-        "  - *Завершить*: Появляется у задач `в работе`. Отметит задачу как `выполненную`.\n"
-        "  - *Отменить*: Появляется у задач `в работе`. Вернет задачу в статус `новая`.\n"
-        "  - *Вернуть в работу*: Появляется у задач `выполнена`. Вернет задачу в статус `в работе`.\n"
-        "  - *Архивировать*: Появляется у *выполненных* задач. Переместит задачу в архив.\n\n"
-        "*Другие команды:*\n"
-        "  - `/new <описание задачи>`: Быстрое создание новой задачи (без интерактивного режима).\n"
-        "  - `/start` или `/help`: Вызывает это приветственное сообщение.\n\n"
-        "Нажмите одну из кнопок, чтобы начать!"
-    )
     try:
-        sent_msg = bot.send_message(chat_id, help_text, parse_mode='Markdown', reply_markup=get_main_keyboard())
+        sent_msg = bot.send_message(chat_id, HELP_TEXT, parse_mode='Markdown', reply_markup=get_main_keyboard())
         new_message_ids.append(sent_msg.message_id)
     except Exception as e:
         print(f"Error sending reply: {e}")
@@ -546,7 +582,10 @@ def webhook(req: https_fn.Request) -> https_fn.Response:
 
                     return https_fn.Response(json.dumps({'status': 'ok'}), status=200, headers={'Content-Type': 'application/json'})
 
-                if update.message.text.startswith("/start") or update.message.text.startswith("/help"):
+                if update.message.text.startswith("/start"):
+                    handle_start_command(bot, update.message)
+                    return https_fn.Response(json.dumps({'status': 'ok'}), status=200, headers={'Content-Type': 'application/json'})
+                elif update.message.text.startswith("/help") or update.message.text == "Помощь":
                     send_welcome_and_help(bot, update.message)
                     return https_fn.Response(json.dumps({'status': 'ok'}), status=200, headers={'Content-Type': 'application/json'})
                 elif update.message.text == "Создать задачу":
@@ -586,9 +625,6 @@ def webhook(req: https_fn.Request) -> https_fn.Response:
                 elif update.message.text == "Архивные задачи":
                     show_tasks(bot, update.message, status=task_manager.STATUS_ARCHIVED)
                     return https_fn.Response(json.dumps({'status': 'ok'}), status=200, headers={'Content-Type': 'application/json'})
-                elif update.message.text == "Помощь":
-                    send_welcome_and_help(bot, update.message)
-                    return https_fn.Response(json.dumps({'status': 'ok'}), status=200, headers={'Content-Type': 'application/json'})
                 elif update.message.text.startswith("/new"):
                     add_new_task(bot, update.message)
                     return https_fn.Response(json.dumps({'status': 'ok'}), status=200, headers={'Content-Type': 'application/json'})
@@ -601,3 +637,4 @@ def webhook(req: https_fn.Request) -> https_fn.Response:
     except Exception as e:
         print(f"Error processing update: {e}")
         return https_fn.Response("Error", status=500)
+
