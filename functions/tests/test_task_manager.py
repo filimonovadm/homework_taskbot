@@ -29,7 +29,8 @@ class TestAddTask(unittest.TestCase):
         # Call the function
         task_text = "Test accumulator task"
         chat_id = 12345
-        new_task = task_manager.add_task(chat_id, task_text)
+        created_by_user = "test_user"
+        new_task = task_manager.add_task(chat_id, task_text, created_by_user)
 
         # Assertions on the returned dictionary
         self.assertIn('created_at', new_task)
@@ -37,6 +38,7 @@ class TestAddTask(unittest.TestCase):
         self.assertEqual(new_task['text'], task_text)
         self.assertEqual(new_task['status'], task_manager.STATUS_NEW)
         self.assertEqual(new_task['accumulated_time_seconds'], 0) # Key assertion for new field
+        self.assertEqual(new_task['created_by'], created_by_user)
 
         # Verify that set was called with the correct data
         mock_document.set.assert_called_once()
@@ -48,6 +50,7 @@ class TestAddTask(unittest.TestCase):
         self.assertEqual(set_data['status'], task_manager.STATUS_NEW)
         self.assertIn('created_at', set_data)
         self.assertEqual(set_data['accumulated_time_seconds'], 0)
+        self.assertEqual(set_data['created_by'], created_by_user)
 
 
 class TestUpdateTaskStatusWithTimeAccumulation(unittest.TestCase):
@@ -126,7 +129,7 @@ class TestUpdateTaskStatusWithTimeAccumulation(unittest.TestCase):
         update_args = self.mock_document_ref.update.call_args[0][0]
         self.assertEqual(update_args["status"], task_manager.STATUS_DONE)
         self.assertIn("completed_at", update_args)
-        self.assertEqual(update_args["in_progress_at"], firestore.DELETE_FIELD)
+        self.assertIs(update_args["in_progress_at"], task_manager.firestore.DELETE_FIELD)
         self.assertAlmostEqual(update_args["accumulated_time_seconds"], 3600)
         self.mock_document_ref.update.reset_mock()
 
@@ -143,7 +146,7 @@ class TestUpdateTaskStatusWithTimeAccumulation(unittest.TestCase):
         update_args = self.mock_document_ref.update.call_args[0][0]
         self.assertEqual(update_args["status"], task_manager.STATUS_IN_PROGRESS)
         self.assertEqual(update_args["in_progress_at"], "2025-01-01T14:00:00")
-        self.assertEqual(update_args["completed_at"], firestore.DELETE_FIELD)
+        self.assertIs(update_args["completed_at"], task_manager.firestore.DELETE_FIELD)
         self.assertNotIn("accumulated_time_seconds", update_args, "Accumulator should not change when re-opening.")
         self.mock_document_ref.update.reset_mock()
 
@@ -159,7 +162,7 @@ class TestUpdateTaskStatusWithTimeAccumulation(unittest.TestCase):
         # VERIFY: Status updated, 'in_progress_at' deleted, accumulator now holds total time.
         update_args = self.mock_document_ref.update.call_args[0][0]
         self.assertEqual(update_args["status"], task_manager.STATUS_DONE)
-        self.assertEqual(update_args["in_progress_at"], firestore.DELETE_FIELD)
+        self.assertIs(update_args["in_progress_at"], task_manager.firestore.DELETE_FIELD)
         # Total should be 1 hour + 30 minutes = 3600 + 1800 = 5400 seconds.
         self.assertAlmostEqual(update_args["accumulated_time_seconds"], 5400)
         self.mock_document_ref.update.reset_mock()

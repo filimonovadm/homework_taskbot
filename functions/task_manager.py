@@ -26,7 +26,7 @@ def get_user_state(user_id: int) -> Dict[str, Any] | None:
         return doc.to_dict()
     return None
 
-def add_task(chat_id: int, text: str) -> Dict[str, Any]:
+def add_task(chat_id: int, text: str, created_by: str) -> Dict[str, Any]:
     """Adds a new task to the Firestore collection for a specific chat."""
     db = firestore.client()
     task_id = str(uuid.uuid4())
@@ -35,7 +35,7 @@ def add_task(chat_id: int, text: str) -> Dict[str, Any]:
         "chat_id": chat_id,
         "text": text,
         "status": STATUS_NEW,
-        "created_by": None,
+        "created_by": created_by,
         "assigned_to": None,
         "created_at": datetime.now().isoformat(),
         "accumulated_time_seconds": 0,  # Initialize accumulator

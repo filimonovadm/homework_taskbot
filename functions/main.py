@@ -83,6 +83,9 @@ def format_task_message(task: dict) -> str:
     if task.get('assigned_to'):
         text += f"\n`Исполнитель: {task['assigned_to']}`"
 
+    if task.get('created_by'):
+        text += f"\n`Создана: {task['created_by']}`"
+
     if task.get('created_at'):
         try:
             created_datetime = datetime.fromisoformat(task['created_at'])
@@ -174,7 +177,9 @@ def add_new_task(bot, message):
         bot.reply_to(message, "Пожалуйста, укажите текст задачи после команды. Например: `/new Купить молоко`", reply_markup=get_main_keyboard())
         return
     try:
-        new_task = task_manager.add_task(message.chat.id, task_text)
+        user_info = message.from_user
+        created_by_user = f"@{user_info.username}" if user_info.username else user_info.first_name or "Unknown User"
+        new_task = task_manager.add_task(message.chat.id, task_text, created_by=created_by_user)
         reply_text = format_task_message(new_task)
         keyboard = get_task_keyboard(new_task['id'], new_task['status'])
         bot.send_message(message.chat.id, reply_text, parse_mode='Markdown', reply_markup=keyboard)
@@ -319,7 +324,9 @@ def webhook(req: https_fn.Request) -> https_fn.Response:
                         return
 
                     try:
-                        new_task = task_manager.add_task(user_id, task_text)
+                        user_info = update.message.from_user
+                        created_by_user = f"@{user_info.username}" if user_info.username else user_info.first_name or "Unknown User"
+                        new_task = task_manager.add_task(user_id, task_text, created_by=created_by_user)
                         reply_text = format_task_message(new_task)
                         keyboard = get_task_keyboard(new_task['id'], new_task['status'])
                         bot.send_message(user_id, "Задача успешно создана!", reply_markup=get_main_keyboard())
