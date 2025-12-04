@@ -49,8 +49,8 @@ def get_task_keyboard(task_id: str, status: str):
     """Создает инлайн-клавиатуру для задачи в зависимости от ее статуса."""
     keyboard = types.InlineKeyboardMarkup()
     if status == task_manager.STATUS_NEW:
-        button_take = types.InlineKeyboardButton("Взять в работу", callback_data=f"take_{task_id}")
-        button_deadline = types.InlineKeyboardButton("Задать дедлайн", callback_data=f"set_deadline_{task_id}")
+        button_take = types.InlineKeyboardButton("▶️ В работу", callback_data=f"take_{task_id}")
+        button_deadline = types.InlineKeyboardButton("🗓️ Срок", callback_data=f"set_deadline_{task_id}")
         button_delete = types.InlineKeyboardButton("❌ Удалить", callback_data=f"delete_{task_id}")
         keyboard.add(button_take, button_deadline, button_delete)
     elif status == task_manager.STATUS_IN_PROGRESS:
