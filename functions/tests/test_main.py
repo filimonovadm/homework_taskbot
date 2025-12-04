@@ -218,5 +218,41 @@ class TestWebhookLogic(unittest.TestCase):
         _, kwargs = mock_task_manager.set_user_state.call_args
         self.assertEqual(kwargs['data']['last_task_list_message_ids'], [501, 502])
 
+    def test_webhook_returns_proper_response(self, mock_https_fn, mock_telebot, mock_task_manager):
+        """Verify that the webhook returns a proper response for various commands."""
+        test_cases = [
+            "/start",
+            "/help",
+            "Помощь",
+            "Открытые задачи",
+            "Задачи в работе",
+            "Задачи выполненные",
+            "Архивные задачи",
+            "/new Some task",
+        ]
+
+        mock_response = mock_https_fn.Response.return_value
+        mock_request = MagicMock()
+        mock_request.method = "POST"
+
+        for command in test_cases:
+            with self.subTest(command=command):
+                mock_telebot.reset_mock()
+                mock_task_manager.reset_mock()
+                
+                self._create_mock_update(command)
+                
+                # Act
+                response = main.webhook(mock_request)
+                
+                # Assert
+                # We expect a 200 OK response for any handled text message
+                self.assertIsNotNone(response)
+                # Ensure we are returning the mocked response object
+                self.assertEqual(response, mock_response)
+                # Check that our mock https_fn.Response was called correctly
+                mock_https_fn.Response.assert_called_with(ANY, status=200, headers={'Content-Type': 'application/json'})
+
+
 if __name__ == '__main__':
     unittest.main()

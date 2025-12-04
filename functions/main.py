@@ -7,8 +7,6 @@ from telebot import types
 from datetime import datetime, timedelta, timezone
 
 
-# Initialize Firebase Admin SDK
-initialize_app()
 
 # Initialize TeleBot
 # Define a timezone for UTC+3 (Moscow time for example)
@@ -79,7 +77,7 @@ def format_task_message(task: dict) -> str:
     }
 
     task_number_str = f"*(Задача #{task['task_number']})* " if task.get('task_number') else ""
-    
+
     text = f"""{status_emoji.get(task['status'], '')} {task_number_str}*{task['text']}*
 `Статус: {task['status']}`"""
 
@@ -96,7 +94,7 @@ def format_task_message(task: dict) -> str:
             text += f"\n`Дата создания: {local_created_datetime.strftime('%d.%m.%Y %H:%M')}`"
         except ValueError:
             text += f"\n`Дата создания: {task['created_at']}`"
-            
+
     # --- Completion Date (only show if actually completed) ---
     if task.get('completed_at'):
         try:
@@ -116,7 +114,7 @@ def format_task_message(task: dict) -> str:
 
     if time_spent_str:
         text += f"\n`{time_spent_str}`"
-            
+
     return text
 
 
@@ -148,10 +146,10 @@ def send_welcome_and_help(bot, message):
                 bot.delete_message(chat_id, msg_id)
             except Exception as e:
                 print(f"Could not delete message {msg_id}: {e}")
-    try:
-        bot.delete_message(chat_id, message.message_id)
-    except Exception as e:
-        print(f"Could not delete user command message: {e}")
+    # try:
+    #     bot.delete_message(chat_id, message.message_id)
+    # except Exception as e:
+    #     print(f"Could not delete user command message: {e}")
 
     # 2. Send the help message
     help_text = (
@@ -187,7 +185,7 @@ def send_welcome_and_help(bot, message):
         print(f"Error sending reply: {e}")
         err_msg = bot.send_message(chat_id, "Произошла ошибка при отображении справки.", reply_markup=get_main_keyboard())
         new_message_ids.append(err_msg.message_id)
-    
+
     # 3. Save the new message ID to state
     current_data = chat_state.get("data", {})
     current_data['last_task_list_message_ids'] = new_message_ids
@@ -207,7 +205,7 @@ def add_new_task(bot, message):
                 bot.delete_message(chat_id, msg_id)
             except Exception as e:
                 print(f"Could not delete message {msg_id}: {e}")
-    
+
     try:
         bot.delete_message(chat_id, message.message_id)
     except Exception as e:
@@ -238,7 +236,7 @@ def add_new_task(bot, message):
             print(f"Ошибка при добавлении задачи: {e}")
             err_msg = bot.send_message(chat_id, "Произошла ошибка при добавлении задачи.", reply_markup=get_main_keyboard())
             new_message_ids.append(err_msg.message_id)
-            
+
     # Finally, save the new message IDs to the user's state
     final_data = chat_state.get("data", {})
     final_data['last_task_list_message_ids'] = new_message_ids
@@ -252,14 +250,14 @@ def show_tasks(bot, message, status: str | None = None):
     # 1. Get current state and delete old messages
     chat_state = task_manager.get_user_state(chat_id) or {}
     old_message_ids = chat_state.get("data", {}).get("last_task_list_message_ids", [])
-    
+
     if old_message_ids:
         for msg_id in old_message_ids:
             try:
                 bot.delete_message(chat_id, msg_id)
             except Exception as e:
                 print(f"Could not delete message {msg_id}: {e}")
-    
+
     # Also delete the user's command message
     try:
         bot.delete_message(chat_id, message.message_id)
@@ -284,7 +282,7 @@ def show_tasks(bot, message, status: str | None = None):
             tasks_to_show = task_manager.get_all_tasks(chat_id)
             header_text = "🔥 *Все задачи: *"
             no_tasks_text = "Нет задач. Отличная работа! ✨"
-            
+
         # 3. Send new messages and collect their IDs
         if not tasks_to_show:
             sent_msg = bot.send_message(chat_id, no_tasks_text, reply_markup=get_main_keyboard(), parse_mode='Markdown')
@@ -313,10 +311,10 @@ def handle_callback_query(bot, call):
     """Обрабатывает нажатия на инлайн-кнопки."""
     try:
         parts = call.data.split('_') # Split into all parts
-        
+
         # The task_id is always the last part
         task_id = parts[-1]
-        
+
         # Reconstruct the action string based on the number of parts
         if len(parts) == 2: # e.g., "take_UUID", "done_UUID", "delete_UUID", "archive_UUID"
             action_full = parts[0]
@@ -328,7 +326,7 @@ def handle_callback_query(bot, call):
             action_full = "unknown" # Fallback for unexpected formats
 
         user_info = call.from_user
-        
+
         new_status = None
         if action_full == "take":
             new_status = task_manager.STATUS_IN_PROGRESS
@@ -349,7 +347,7 @@ def handle_callback_query(bot, call):
         elif action_full == "delete":
             success = task_manager.delete_task(task_id)
             if success:
-                bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, 
+                bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id,
                                       text="Задача успешно удалена.", parse_mode='Markdown')
                 bot.answer_callback_query(call.id, "Задача удалена.")
             else:
@@ -365,13 +363,13 @@ def handle_callback_query(bot, call):
             return
 
         success = task_manager.update_task_status(task_id, new_status, user_info)
-        
+
         if success:
             task = task_manager.get_task_by_id(task_id)
             if task:
                 new_text = format_task_message(task)
                 new_keyboard = get_task_keyboard(task_id, new_status)
-                bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, 
+                bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id,
                                       text=new_text, parse_mode='Markdown', reply_markup=new_keyboard)
                 bot.answer_callback_query(call.id, f"Статус задачи обновлен на '{new_status}'")
             else:
@@ -390,17 +388,22 @@ import json
 
 _bot_instance = None # Use a global variable to store the bot instance
 
+_firebase_app_initialized = False
+
 @https_fn.on_request(region="europe-west1")
 def webhook(req: https_fn.Request) -> https_fn.Response:
     """Handles incoming Telegram updates."""
-    global _bot_instance
+    global _bot_instance, _firebase_app_initialized
+    if not _firebase_app_initialized:
+        initialize_app()
+        _firebase_app_initialized = True
     if _bot_instance is None:
         telegram_bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
         if not telegram_bot_token:
             print("TELEGRAM_BOT_TOKEN is not set. Bot application will not be initialized.")
             return https_fn.Response("Bot not initialized", status=500)
         _bot_instance = telebot.TeleBot(telegram_bot_token)
-    
+
     bot = _bot_instance # Use the instantiated bot
 
     try:
@@ -408,14 +411,14 @@ def webhook(req: https_fn.Request) -> https_fn.Response:
             json_data = req.get_json(force=True)
             print(f"Received POST data: {json_data}")
             update = telebot.types.Update.de_json(json_data)
-            
+
             if update.message and update.message.text:
                 user_id = update.message.chat.id
                 user_state = task_manager.get_user_state(user_id)
 
                 if user_state and user_state.get("state") == "awaiting_task_description":
                     # This is the handler for when the user provides the task description.
-                    
+
                     # First, clean up the "Пожалуйста, введите..." prompt message.
                     chat_state = user_state or {}
                     old_message_ids = chat_state.get("data", {}).get("last_task_list_message_ids", [])
@@ -428,7 +431,7 @@ def webhook(req: https_fn.Request) -> https_fn.Response:
 
                     task_text = update.message.text
                     new_message_ids = []
-                    
+
                     try:
                         # Also delete the user's message with the description
                         bot.delete_message(chat_id=user_id, message_id=update.message.message_id)
@@ -444,7 +447,7 @@ def webhook(req: https_fn.Request) -> https_fn.Response:
                             new_task = task_manager.add_task(user_id, task_text, created_by=created_by_user)
                             reply_text = format_task_message(new_task)
                             keyboard = get_task_keyboard(new_task['id'], new_task['status'])
-                            
+
                             msg1 = bot.send_message(user_id, "Задача успешно создана!", reply_markup=get_main_keyboard())
                             msg2 = bot.send_message(user_id, reply_text, parse_mode='Markdown', reply_markup=keyboard)
                             new_message_ids.extend([msg1.message_id, msg2.message_id])
@@ -452,22 +455,23 @@ def webhook(req: https_fn.Request) -> https_fn.Response:
                             print(f"Ошибка при добавлении задачи через кнопку: {e}")
                             err_msg = bot.send_message(user_id, "Произошла ошибка при создании задачи.", reply_markup=get_main_keyboard())
                             new_message_ids.append(err_msg.message_id)
-                    
+
                     # Save the IDs of the messages just sent, so the next command can clean them up.
                     final_state = task_manager.get_user_state(user_id) or {}
                     final_data = final_state.get("data", {})
                     final_data['last_task_list_message_ids'] = new_message_ids
                     task_manager.set_user_state(user_id, "idle", data=final_data)
-                    
+
                     return
 
                 if update.message.text.startswith("/start") or update.message.text.startswith("/help"):
                     send_welcome_and_help(bot, update.message)
+                    return https_fn.Response(json.dumps({'status': 'ok'}), status=200, headers={'Content-Type': 'application/json'})
                 elif update.message.text == "Создать задачу":
                     # Clean up previous messages first
                     chat_state = task_manager.get_user_state(user_id) or {}
                     old_message_ids = chat_state.get("data", {}).get("last_task_list_message_ids", [])
-                    
+
                     if old_message_ids:
                         for msg_id in old_message_ids:
                             try:
@@ -482,27 +486,35 @@ def webhook(req: https_fn.Request) -> https_fn.Response:
 
                     # Now, proceed with the original logic
                     sent_msg = bot.send_message(user_id, "Пожалуйста, введите описание задачи:", reply_markup=get_main_keyboard())
-                    
+
                     # Store the ID of this prompt message so it can be cleaned up by the next action.
                     current_data = chat_state.get("data", {})
                     current_data['last_task_list_message_ids'] = [sent_msg.message_id]
                     task_manager.set_user_state(user_id, "awaiting_task_description", data=current_data)
+                    return https_fn.Response(json.dumps({'status': 'ok'}), status=200, headers={'Content-Type': 'application/json'})
                 elif update.message.text == "Открытые задачи":
                     show_tasks(bot, update.message, status="open")
+                    return https_fn.Response(json.dumps({'status': 'ok'}), status=200, headers={'Content-Type': 'application/json'})
                 elif update.message.text == "Задачи в работе":
                     show_tasks(bot, update.message, status=task_manager.STATUS_IN_PROGRESS)
+                    return https_fn.Response(json.dumps({'status': 'ok'}), status=200, headers={'Content-Type': 'application/json'})
                 elif update.message.text == "Задачи выполненные":
                     show_tasks(bot, update.message, status=task_manager.STATUS_DONE)
+                    return https_fn.Response(json.dumps({'status': 'ok'}), status=200, headers={'Content-Type': 'application/json'})
                 elif update.message.text == "Архивные задачи":
                     show_tasks(bot, update.message, status=task_manager.STATUS_ARCHIVED)
+                    return https_fn.Response(json.dumps({'status': 'ok'}), status=200, headers={'Content-Type': 'application/json'})
                 elif update.message.text == "Помощь":
                     send_welcome_and_help(bot, update.message)
+                    return https_fn.Response(json.dumps({'status': 'ok'}), status=200, headers={'Content-Type': 'application/json'})
                 elif update.message.text.startswith("/new"):
                     add_new_task(bot, update.message)
+                    return https_fn.Response(json.dumps({'status': 'ok'}), status=200, headers={'Content-Type': 'application/json'})
             elif update.callback_query:
                 handle_callback_query(bot, update.callback_query)
+                return https_fn.Response(json.dumps({'status': 'ok'}), status=200, headers={'Content-Type': 'application/json'})
 
-            return https_fn.Response(json.dumps({'status': 'ok'}), status=200, headers={'Content-Type': 'application/json'})
+            return https_fn.Response(json.dumps({'status': 'unhandled'}), status=200, headers={'Content-Type': 'application/json'})
         return https_fn.Response("Unsupported method", status=405)
     except Exception as e:
         print(f"Error processing update: {e}")
