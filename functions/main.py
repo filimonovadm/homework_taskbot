@@ -188,9 +188,29 @@ def add_new_task(bot, message):
         bot.reply_to(message, "Произошла ошибка при добавлении задачи.", reply_markup=get_main_keyboard())
 
 def show_tasks(bot, message, status: str | None = None):
-    """Показывает список задач, опционально фильтруя по статусу."""
+    """Показывает список задач, опционально фильтруя по статусу. Удаляет предыдущий список задач."""
+    chat_id = message.chat.id
+    new_message_ids = []
+
+    # 1. Get current state and delete old messages
+    chat_state = task_manager.get_user_state(chat_id) or {}
+    old_message_ids = chat_state.get("data", {}).get("last_task_list_message_ids", [])
+    
+    if old_message_ids:
+        for msg_id in old_message_ids:
+            try:
+                bot.delete_message(chat_id, msg_id)
+            except Exception as e:
+                print(f"Could not delete message {msg_id}: {e}")
+    
+    # Also delete the user's command message
     try:
-        chat_id = message.chat.id
+        bot.delete_message(chat_id, message.message_id)
+    except Exception as e:
+        print(f"Could not delete user command message: {e}")
+
+    try:
+        # 2. Get tasks to display
         if status == "open":
             tasks_to_show = task_manager.get_tasks(chat_id, status="open")
             header_text = "🔥 *Новые задачи: *"
@@ -204,23 +224,33 @@ def show_tasks(bot, message, status: str | None = None):
             header_text = f"🔥 *Задачи со статусом '{status}':*"
             no_tasks_text = f"Нет задач со статусом '{status}'. Отличная работа! ✨"
         else:
-            tasks_to_show = task_manager.get_all_tasks(chat_id) # This will use get_tasks(None) from task_manager
+            tasks_to_show = task_manager.get_all_tasks(chat_id)
             header_text = "🔥 *Все задачи: *"
             no_tasks_text = "Нет задач. Отличная работа! ✨"
             
+        # 3. Send new messages and collect their IDs
         if not tasks_to_show:
-            bot.reply_to(message, no_tasks_text, reply_markup=get_main_keyboard(), parse_mode='Markdown')
-            return
-            
-        bot.send_message(message.chat.id, header_text, parse_mode='Markdown', reply_markup=get_main_keyboard())
-        for task in tasks_to_show:
-            task_text = format_task_message(task)
-            keyboard = get_task_keyboard(task['id'], task['status'])
-            bot.send_message(message.chat.id, task_text, parse_mode='Markdown', reply_markup=keyboard)
-            
+            sent_msg = bot.send_message(chat_id, no_tasks_text, reply_markup=get_main_keyboard(), parse_mode='Markdown')
+            new_message_ids.append(sent_msg.message_id)
+        else:
+            header_msg = bot.send_message(chat_id, header_text, parse_mode='Markdown', reply_markup=get_main_keyboard())
+            new_message_ids.append(header_msg.message_id)
+            for task in tasks_to_show:
+                task_text = format_task_message(task)
+                keyboard = get_task_keyboard(task['id'], task['status'])
+                task_msg = bot.send_message(chat_id, task_text, parse_mode='Markdown', reply_markup=keyboard)
+                new_message_ids.append(task_msg.message_id)
+
     except Exception as e:
         print(f"Ошибка при получении списка задач: {e}")
-        bot.reply_to(message, "Произошла ошибка при получении списка задач.", reply_markup=get_main_keyboard())
+        error_msg = bot.send_message(chat_id, "Произошла ошибка при получении списка задач.", reply_markup=get_main_keyboard())
+        new_message_ids.append(error_msg.message_id)
+
+    finally:
+        # 4. Save the new message IDs to the user's state
+        current_data = chat_state.get("data", {})
+        current_data['last_task_list_message_ids'] = new_message_ids
+        task_manager.set_user_state(chat_id, chat_state.get("state", "idle"), data=current_data)
 
 def handle_callback_query(bot, call):
     """Обрабатывает нажатия на инлайн-кнопки."""
