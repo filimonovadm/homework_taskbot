@@ -111,7 +111,7 @@ class TestWebhookLogic(unittest.TestCase):
         old_bot_message_ids = [98, 99]
 
         mock_bot = mock_telebot.TeleBot.return_value
-        self._create_mock_update("Задачи в работе", chat_id=chat_id, message_id=user_message_id)
+        self._create_mock_update("👨‍💻 Задачи в работе", chat_id=chat_id, message_id=user_message_id)
         
         mock_task_manager.get_user_state.return_value = {
             "state": "idle",
@@ -223,11 +223,11 @@ class TestWebhookLogic(unittest.TestCase):
         test_cases = [
             "/start",
             "/help",
-            "Помощь",
-            "Открытые задачи",
-            "Задачи в работе",
-            "Задачи выполненные",
-            "Архивные задачи",
+            "❓ Помощь",
+            "🔥 Открытые задачи",
+            "👨‍💻 Задачи в работе",
+            "✅ Задачи выполненные",
+            "🗄️ Архивные задачи",
             "/new Some task",
         ]
 
