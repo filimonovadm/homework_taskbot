@@ -45,7 +45,7 @@ def get_next_task_number(chat_id: int) -> int:
     transaction = db.transaction()
     return _get_next_task_number_transaction(transaction, counter_ref)
 
-def add_task(chat_id: int, text: str, created_by: str) -> Dict[str, Any]:
+def add_task(chat_id: int, text: str, created_by: str, deadline_at: str | None = None) -> Dict[str, Any]:
     """Adds a new task to the Firestore collection for a specific chat."""
     db = firestore.client()
     task_id = str(uuid.uuid4())
@@ -61,6 +61,8 @@ def add_task(chat_id: int, text: str, created_by: str) -> Dict[str, Any]:
         "created_at": datetime.now().isoformat(),
         "accumulated_time_seconds": 0,  # Initialize accumulator
     }
+    if deadline_at:
+        new_task["deadline_at"] = deadline_at
     db.collection(TASKS_COLLECTION).document(task_id).set(new_task)
     return new_task
 
@@ -100,6 +102,15 @@ def delete_task(task_id: str) -> bool:
     doc = doc_ref.get()
     if doc.exists:
         doc_ref.delete()
+        return True
+    return False
+
+def update_task_deadline(task_id: str, deadline_at: str) -> bool:
+    """Updates the deadline of a task."""
+    db = firestore.client()
+    doc_ref = db.collection(TASKS_COLLECTION).document(task_id)
+    if doc_ref.get().exists:
+        doc_ref.update({"deadline_at": deadline_at})
         return True
     return False
 

@@ -5,8 +5,7 @@ import os
 import task_manager
 from telebot import types
 from datetime import datetime, timedelta, timezone
-
-
+from telegram_bot_calendar import DetailedTelegramCalendar, LSTEP
 
 # Initialize TeleBot
 # Define a timezone for UTC+3 (Moscow time for example)
@@ -23,8 +22,9 @@ def get_task_keyboard(task_id: str, status: str):
     keyboard = types.InlineKeyboardMarkup()
     if status == task_manager.STATUS_NEW:
         button_take = types.InlineKeyboardButton("Взять в работу", callback_data=f"take_{task_id}")
+        button_deadline = types.InlineKeyboardButton("Задать дедлайн", callback_data=f"set_deadline_{task_id}")
         button_delete = types.InlineKeyboardButton("❌ Удалить", callback_data=f"delete_{task_id}")
-        keyboard.add(button_take, button_delete)
+        keyboard.add(button_take, button_deadline, button_delete)
     elif status == task_manager.STATUS_IN_PROGRESS:
         button_done = types.InlineKeyboardButton("✅ Завершить", callback_data=f"done_{task_id}")
         button_reopen_new = types.InlineKeyboardButton("🔄 Отменить", callback_data=f"reopen_new_{task_id}")
@@ -95,6 +95,14 @@ def format_task_message(task: dict) -> str:
         except ValueError:
             text += f"\n`Дата создания: {task['created_at']}`"
 
+    if task.get('deadline_at'):
+        try:
+            deadline_datetime = datetime.fromisoformat(task['deadline_at'])
+            local_deadline_datetime = convert_utc_to_local(deadline_datetime)
+            text += f"\n`Дедлайн: {local_deadline_datetime.strftime('%d.%m.%Y')}`"
+        except ValueError:
+            text += f"\n`Дедлайн: {task['deadline_at']}`"
+
     # --- Completion Date (only show if actually completed) ---
     if task.get('completed_at'):
         try:
@@ -146,10 +154,6 @@ def send_welcome_and_help(bot, message):
                 bot.delete_message(chat_id, msg_id)
             except Exception as e:
                 print(f"Could not delete message {msg_id}: {e}")
-    # try:
-    #     bot.delete_message(chat_id, message.message_id)
-    # except Exception as e:
-    #     print(f"Could not delete user command message: {e}")
 
     # 2. Send the help message
     help_text = (
@@ -310,10 +314,80 @@ def show_tasks(bot, message, status: str | None = None):
 def handle_callback_query(bot, call):
     """Обрабатывает нажатия на инлайн-кнопки."""
     try:
+        # Calendar callback handling
+        if call.data.startswith('cbcal_'):
+            result, key, step = DetailedTelegramCalendar(locale='ru').process(call.data)
+            user_state = task_manager.get_user_state(call.from_user.id)
+            state_data = (user_state or {}).get("data", {}) or {}
+
+            if not result and key:
+                if user_state and user_state.get("state") == "calendar_set_deadline":
+                    bot.edit_message_text(f"Выберите {LSTEP[step]}", call.message.chat.id, call.message.message_id, reply_markup=key)
+            elif result and user_state and user_state.get("state") == "calendar_set_deadline":
+                task_id = state_data.get("deadline_task_id")
+                original_message_id = state_data.get("deadline_task_message_id")
+                last_message_ids = list(state_data.get("last_task_list_message_ids", []))
+
+                if not task_id:
+                    bot.edit_message_text("Произошла ошибка: не удалось найти задачу.", call.message.chat.id, call.message.message_id)
+                    return
+
+                deadline_str = result.isoformat()
+                task_manager.update_task_deadline(task_id, deadline_str)
+                task = task_manager.get_task_by_id(task_id)
+                if not task:
+                    bot.edit_message_text("Задача не найдена.", call.message.chat.id, call.message.message_id)
+                    return
+
+                new_text = format_task_message(task)
+                new_keyboard = get_task_keyboard(task_id, task['status'])
+
+                message_updated = False
+                if original_message_id:
+                    try:
+                        bot.edit_message_text(chat_id=call.message.chat.id,
+                                              message_id=original_message_id,
+                                              text=new_text,
+                                              parse_mode='Markdown',
+                                              reply_markup=new_keyboard)
+                        message_updated = True
+                    except Exception as e:
+                        print(f"Не удалось обновить исходное сообщение задачи: {e}")
+
+                if not message_updated:
+                    sent_msg = bot.send_message(call.message.chat.id, new_text, parse_mode='Markdown', reply_markup=new_keyboard)
+                    if original_message_id and original_message_id in last_message_ids:
+                        last_message_ids = [sent_msg.message_id if mid == original_message_id else mid for mid in last_message_ids]
+                    else:
+                        last_message_ids.append(sent_msg.message_id)
+                try:
+                    bot.delete_message(call.message.chat.id, call.message.message_id)
+                except Exception as e:
+                    print(f"Не удалось удалить сообщение календаря: {e}")
+
+                cleaned_state_data = dict(state_data)
+                cleaned_state_data.pop("deadline_task_id", None)
+                cleaned_state_data.pop("deadline_task_message_id", None)
+                cleaned_state_data['last_task_list_message_ids'] = last_message_ids
+                task_manager.set_user_state(call.from_user.id, "idle", data=cleaned_state_data)
+            return
+
         parts = call.data.split('_') # Split into all parts
 
-        # The task_id is always the last part
+        action_prefix = "_".join(parts[:-1])
         task_id = parts[-1]
+
+        if action_prefix == "set_deadline":
+            calendar, step = DetailedTelegramCalendar(locale='ru', current_date=datetime.now().date()).build()
+            bot.send_message(call.message.chat.id, f"Выберите {LSTEP[step]}", reply_markup=calendar)
+            existing_state = task_manager.get_user_state(call.from_user.id) or {}
+            current_data = dict(existing_state.get("data") or {})
+            current_data.update({
+                "deadline_task_id": task_id,
+                "deadline_task_message_id": call.message.message_id,
+            })
+            task_manager.set_user_state(call.from_user.id, "calendar_set_deadline", current_data)
+            return
 
         # Reconstruct the action string based on the number of parts
         if len(parts) == 2: # e.g., "take_UUID", "done_UUID", "delete_UUID", "archive_UUID"
@@ -359,7 +433,8 @@ def handle_callback_query(bot, call):
             new_status = task_manager.STATUS_IN_PROGRESS
 
         if not new_status:
-            bot.answer_callback_query(call.id, "Неизвестное действие.")
+            # This case will be hit for "set_deadline" and other unhandled callbacks.
+            # We already handled "set_deadline" and calendar callbacks, so we can ignore this.
             return
 
         success = task_manager.update_task_status(task_id, new_status, user_info)
@@ -448,6 +523,7 @@ def webhook(req: https_fn.Request) -> https_fn.Response:
                             reply_text = format_task_message(new_task)
                             keyboard = get_task_keyboard(new_task['id'], new_task['status'])
 
+                            # Send "Success" message with the main keyboard, then the task with its inline keyboard
                             msg1 = bot.send_message(user_id, "Задача успешно создана!", reply_markup=get_main_keyboard())
                             msg2 = bot.send_message(user_id, reply_text, parse_mode='Markdown', reply_markup=keyboard)
                             new_message_ids.extend([msg1.message_id, msg2.message_id])
@@ -462,7 +538,7 @@ def webhook(req: https_fn.Request) -> https_fn.Response:
                     final_data['last_task_list_message_ids'] = new_message_ids
                     task_manager.set_user_state(user_id, "idle", data=final_data)
 
-                    return
+                    return https_fn.Response(json.dumps({'status': 'ok'}), status=200, headers={'Content-Type': 'application/json'})
 
                 if update.message.text.startswith("/start") or update.message.text.startswith("/help"):
                     send_welcome_and_help(bot, update.message)

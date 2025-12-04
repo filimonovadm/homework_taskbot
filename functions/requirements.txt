@@ -1,3 +1,5 @@
 pyTelegramBotAPI
 firebase-functions
 firebase-admin
+python-dateutil
+python-telegram-bot-calendar
