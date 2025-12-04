@@ -421,13 +421,20 @@ def handle_callback_query(bot, call):
 
         if action_prefix == "set_deadline":
             calendar, step = DetailedTelegramCalendar(locale='ru', current_date=datetime.now().date()).build()
-            bot.send_message(call.message.chat.id, f"Выберите {LSTEP[step]}", reply_markup=calendar)
+            sent_calendar_msg = bot.send_message(call.message.chat.id, f"Выберите {LSTEP[step]}", reply_markup=calendar)
+            
             existing_state = task_manager.get_user_state(call.from_user.id) or {}
             current_data = dict(existing_state.get("data") or {})
+            
+            message_ids_to_clean = current_data.get('last_task_list_message_ids', [])
+            message_ids_to_clean.append(sent_calendar_msg.message_id)
+            
             current_data.update({
                 "deadline_task_id": task_id,
                 "deadline_task_message_id": call.message.message_id,
+                "last_task_list_message_ids": message_ids_to_clean
             })
+            
             task_manager.set_user_state(call.from_user.id, "calendar_set_deadline", current_data)
             return
 
