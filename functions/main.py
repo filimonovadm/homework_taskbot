@@ -248,7 +248,17 @@ def handle_callback_query(bot, call):
         elif action_full == "done":
             new_status = task_manager.STATUS_DONE
         elif action_full == "archive":
-            new_status = task_manager.STATUS_ARCHIVED
+            task_to_archive = task_manager.get_task_by_id(task_id)
+            if task_to_archive:
+                created_by_user = f"@{user_info.username}" if user_info.username else user_info.first_name or "Unknown User"
+                if task_to_archive.get("created_by") == created_by_user:
+                    new_status = task_manager.STATUS_ARCHIVED
+                else:
+                    bot.answer_callback_query(call.id, "Только автор задачи может ее архивировать.")
+                    return
+            else:
+                bot.answer_callback_query(call.id, "Не удалось найти задачу.")
+                return
         elif action_full == "delete":
             success = task_manager.delete_task(task_id)
             if success:
