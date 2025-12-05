@@ -12,17 +12,24 @@ from telegram_bot_calendar import DetailedTelegramCalendar, LSTEP
 MOSCOW_TZ = timezone(timedelta(hours=3))
 
 # --- Constants ---
+BTN_CREATE = "❇️ Создать задачу"
+BTN_OPEN = "🔥 Открытые задачи"
+BTN_IN_PROGRESS = "👨‍💻 Задачи в работе"
+BTN_DONE = "✅ Задачи выполненные"
+BTN_ARCHIVED = "🗄️ Архивные задачи"
+BTN_HELP = "❓ Помощь"
+
 HELP_TEXT = (
     "Привет! Я — ваш персональный менеджер задач. Я помогу вам отслеживать домашние дела и ничего не забывать.\n\n"
     "🤖 *Работа в групповых чатах:*\n"
     "Чтобы я мог эффективно работать в группе, мне нужны права администратора. Это позволит мне удалять сообщения и управлять задачами.\n\n"
     "⬇️ *Основные команды (клавиатура внизу):*\n"
-    "  - `❇️ Создать задачу`: Интерактивное создание новой задачи.\n"
-    "  - `🔥 Открытые задачи`: Показывает все новые задачи, ожидающие исполнителя.\n"
-    "  - `👨‍💻 Задачи в работе`: Список задач, которые уже кто-то выполняет.\n"
-    "  - `✅ Задачи выполненные`: Показывает успешно завершенные задачи.\n"
-    "  - `🗄️ Архивные задачи`: Список задач, которые были убраны в архив.\n"
-    "  - `❓ Помощь`: Отображает это справочное сообщение.\n\n"
+    f"  - `{BTN_CREATE}`: Интерактивное создание новой задачи.\n"
+    f"  - `{BTN_OPEN}`: Показывает все новые задачи, ожидающие исполнителя.\n"
+    f"  - `{BTN_IN_PROGRESS}`: Список задач, которые уже кто-то выполняет.\n"
+    f"  - `{BTN_DONE}`: Показывает успешно завершенные задачи.\n"
+    f"  - `{BTN_ARCHIVED}`: Список задач, которые были убраны в архив.\n"
+    f"  - `{BTN_HELP}`: Отображает это справочное сообщение.\n\n"
     "🔄 *Жизненный цикл задачи:*\n"
     "  - `🆕 Новая`: Задача только создана.\n"
     "  - `👨‍💻 В работе`: Кто-то взялся за выполнение.\n"
@@ -162,7 +169,7 @@ def format_task_message(task: dict) -> str:
 
     if time_spent_str:
         text += f"\n`{time_spent_str}`"
-    
+
     # --- Rating ---
     if task.get("rating") is not None:
         stars = "⭐" * task["rating"]
@@ -184,15 +191,28 @@ def format_task_message(task: dict) -> str:
     return text
 
 
-def get_main_keyboard():
-    """Создает основную клавиатуру с кнопками 'Создать задачу', 'Открытые задачи', 'Задачи в работе', 'Задачи выполненные', 'Архивные задачи' и 'Помощь'."""
+def get_main_keyboard(chat_id: int):
+    """Создает основную клавиатуру с количеством задач на кнопках."""
+    # Fetch all tasks to count them
+    try:
+        tasks = task_manager.get_all_tasks(chat_id)
+        count_open = sum(1 for t in tasks if t['status'] == task_manager.STATUS_NEW)
+        count_in_progress = sum(1 for t in tasks if t['status'] == task_manager.STATUS_IN_PROGRESS)
+        count_done = sum(1 for t in tasks if t['status'] == task_manager.STATUS_DONE)
+        count_archived = sum(1 for t in tasks if t['status'] == task_manager.STATUS_ARCHIVED)
+    except Exception as e:
+        print(f"Error fetching tasks for keyboard counts: {e}")
+        count_open = count_in_progress = count_done = count_archived = 0
+
     keyboard = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
-    button_create_task = types.KeyboardButton("❇️ Создать задачу")
-    button_all_tasks = types.KeyboardButton("🔥 Открытые задачи")
-    button_in_progress_tasks = types.KeyboardButton("👨‍💻 Задачи в работе")
-    button_done_tasks = types.KeyboardButton("✅ Задачи выполненные")
-    button_archived_tasks = types.KeyboardButton("🗄️ Архивные задачи")
-    button_help = types.KeyboardButton("❓ Помощь")
+
+    button_create_task = types.KeyboardButton(BTN_CREATE)
+    button_all_tasks = types.KeyboardButton(f"{BTN_OPEN} ({count_open})")
+    button_in_progress_tasks = types.KeyboardButton(f"{BTN_IN_PROGRESS} ({count_in_progress})")
+    button_done_tasks = types.KeyboardButton(f"{BTN_DONE} ({count_done})")
+    button_archived_tasks = types.KeyboardButton(f"{BTN_ARCHIVED} ({count_archived})")
+    button_help = types.KeyboardButton(BTN_HELP)
+
     keyboard.add(button_create_task, button_all_tasks)
     keyboard.add(button_in_progress_tasks, button_done_tasks)
     keyboard.add(button_archived_tasks, button_help)
@@ -201,9 +221,6 @@ def get_main_keyboard():
 def handle_start_command(bot, message):
     """
     Handles the /start command.
-    Sends a fresh welcome message and resets the message state. It cleans up the
-    bot's previous messages but intentionally avoids deleting the user's own
-    /start message to prevent timeouts in scenarios like a cleared chat.
     """
     chat_id = message.chat.id
     new_message_ids = []
@@ -220,11 +237,11 @@ def handle_start_command(bot, message):
 
     # Send the welcome message
     try:
-        sent_msg = bot.send_message(chat_id, HELP_TEXT, parse_mode='Markdown', reply_markup=get_main_keyboard())
+        sent_msg = bot.send_message(chat_id, HELP_TEXT, parse_mode='Markdown', reply_markup=get_main_keyboard(chat_id))
         new_message_ids.append(sent_msg.message_id)
     except Exception as e:
         print(f"Error sending reply: {e}")
-        err_msg = bot.send_message(chat_id, "Произошла ошибка при отображении справки.", reply_markup=get_main_keyboard())
+        err_msg = bot.send_message(chat_id, "Произошла ошибка при отображении справки.", reply_markup=get_main_keyboard(chat_id))
         new_message_ids.append(err_msg.message_id)
 
     # Overwrite the state with the new message ID, effectively resetting it.
@@ -255,11 +272,11 @@ def send_welcome_and_help(bot, message):
 
     # 2. Send the help message
     try:
-        sent_msg = bot.send_message(chat_id, HELP_TEXT, parse_mode='Markdown', reply_markup=get_main_keyboard())
+        sent_msg = bot.send_message(chat_id, HELP_TEXT, parse_mode='Markdown', reply_markup=get_main_keyboard(chat_id))
         new_message_ids.append(sent_msg.message_id)
     except Exception as e:
         print(f"Error sending reply: {e}")
-        err_msg = bot.send_message(chat_id, "Произошла ошибка при отображении справки.", reply_markup=get_main_keyboard())
+        err_msg = bot.send_message(chat_id, "Произошла ошибка при отображении справки.", reply_markup=get_main_keyboard(chat_id))
         new_message_ids.append(err_msg.message_id)
 
     # 3. Save the new message ID to state
@@ -293,7 +310,7 @@ def add_new_task(bot, message):
         task_text = ""
 
     if not task_text:
-        sent_msg = bot.send_message(chat_id, "Пожалуйста, укажите текст задачи после команды. Например: `/new Купить молоко`", reply_markup=get_main_keyboard())
+        sent_msg = bot.send_message(chat_id, "Пожалуйста, укажите текст задачи после команды. Например: `/new Купить молоко`", reply_markup=get_main_keyboard(chat_id))
         new_message_ids.append(sent_msg.message_id)
     else:
         try:
@@ -304,13 +321,13 @@ def add_new_task(bot, message):
             keyboard = get_task_keyboard(new_task['id'], new_task['status'], new_task)
 
             # Send "Success" message with the main keyboard, then the task with its inline keyboard
-            msg1 = bot.send_message(chat_id, "Задача успешно создана!", reply_markup=get_main_keyboard())
+            msg1 = bot.send_message(chat_id, "Задача успешно создана!", reply_markup=get_main_keyboard(chat_id))
             msg2 = bot.send_message(chat_id, reply_text, parse_mode='Markdown', reply_markup=keyboard)
             new_message_ids.extend([msg1.message_id, msg2.message_id])
 
         except Exception as e:
             print(f"Ошибка при добавлении задачи: {e}")
-            err_msg = bot.send_message(chat_id, "Произошла ошибка при добавлении задачи.", reply_markup=get_main_keyboard())
+            err_msg = bot.send_message(chat_id, "Произошла ошибка при добавлении задачи.", reply_markup=get_main_keyboard(chat_id))
             new_message_ids.append(err_msg.message_id)
 
     # Finally, save the new message IDs to the user's state
@@ -369,10 +386,10 @@ def show_tasks(bot, message, status: str | None = None):
 
         # 3. Send new messages and collect their IDs
         if not tasks_to_show:
-            sent_msg = bot.send_message(chat_id, no_tasks_text, reply_markup=get_main_keyboard(), parse_mode='Markdown')
+            sent_msg = bot.send_message(chat_id, no_tasks_text, reply_markup=get_main_keyboard(chat_id), parse_mode='Markdown')
             new_message_ids.append(sent_msg.message_id)
         else:
-            header_msg = bot.send_message(chat_id, header_text, parse_mode='Markdown', reply_markup=get_main_keyboard())
+            header_msg = bot.send_message(chat_id, header_text, parse_mode='Markdown', reply_markup=get_main_keyboard(chat_id))
             new_message_ids.append(header_msg.message_id)
             for task in tasks_to_show:
                 task_text = format_task_message(task)
@@ -382,7 +399,7 @@ def show_tasks(bot, message, status: str | None = None):
 
     except Exception as e:
         print(f"Ошибка при получении списка задач: {e}")
-        error_msg = bot.send_message(chat_id, "Произошла ошибка при получении списка задач.", reply_markup=get_main_keyboard())
+        error_msg = bot.send_message(chat_id, "Произошла ошибка при получении списка задач.", reply_markup=get_main_keyboard(chat_id))
         new_message_ids.append(error_msg.message_id)
 
     finally:
@@ -411,7 +428,7 @@ def handle_callback_query(bot, call):
             parts = call.data.split('_')
             rating = int(parts[2])
             task_id = parts[3]
-            
+
             success = task_manager.rate_task(task_id, rating)
             if success:
                 task = task_manager.get_task_by_id(task_id)
@@ -490,26 +507,27 @@ def handle_callback_query(bot, call):
         # --- Other Task Action Callbacks ---
         if call.data.startswith("add_comment_"):
              task_id = call.data.split('_')[2]
-             
+             chat_id = call.message.chat.id
+
              # Clean up previous messages first
-             chat_state = task_manager.get_user_state(call.message.chat.id) or {}
+             chat_state = task_manager.get_user_state(chat_id) or {}
              old_message_ids = chat_state.get("data", {}).get("last_task_list_message_ids", [])
 
              if old_message_ids:
                  for msg_id in old_message_ids:
                      try:
-                         bot.delete_message(call.message.chat.id, msg_id)
+                         bot.delete_message(chat_id, msg_id)
                      except Exception as e:
                          print(f"Could not delete message {msg_id}: {e}")
-             
-             sent_msg = bot.send_message(call.message.chat.id, "Введите комментарий к задаче:", reply_markup=get_main_keyboard())
-             
+
+             sent_msg = bot.send_message(chat_id, "Введите комментарий к задаче:", reply_markup=get_main_keyboard(chat_id))
+
              current_data = chat_state.get("data", {})
              current_data['comment_task_id'] = task_id
              current_data['comment_task_message_id'] = call.message.message_id # We might want to update this message later
              current_data['last_task_list_message_ids'] = [sent_msg.message_id]
-             
-             task_manager.set_user_state(call.message.chat.id, "awaiting_comment", data=current_data)
+
+             task_manager.set_user_state(chat_id, "awaiting_comment", data=current_data)
              bot.answer_callback_query(call.id)
              return
 
@@ -517,18 +535,18 @@ def handle_callback_query(bot, call):
             task_id = call.data.split('_')[2]
             calendar, step = DetailedTelegramCalendar(locale='ru').build()
             bot.send_message(call.message.chat.id, f"Выберите {LSTEP[step]}", reply_markup=calendar)
-            
+
             # Save state
             user_state = task_manager.get_user_state(call.from_user.id)
             state_data = (user_state or {}).get("data", {}) or {}
             state_data['deadline_task_id'] = task_id
             state_data['deadline_task_message_id'] = call.message.message_id
-            
+
             task_manager.set_user_state(call.from_user.id, "calendar_set_deadline", data=state_data)
             bot.answer_callback_query(call.id)
             return
 
-        parts = call.data.split('_') 
+        parts = call.data.split('_')
         task_id = parts[-1]
         action_prefix = "_".join(parts[:-1]) # This is already correctly 'reopen_in_progress' for the button.
 
@@ -644,7 +662,7 @@ def webhook(req: https_fn.Request) -> https_fn.Response:
                     except Exception: pass
 
                     if not task_text:
-                        msg = bot.send_message(user_id, "Описание задачи не может быть пустым. Пожалуйста, попробуйте еще раз.", reply_markup=get_main_keyboard())
+                        msg = bot.send_message(user_id, "Описание задачи не может быть пустым. Пожалуйста, попробуйте еще раз.", reply_markup=get_main_keyboard(user_id))
                         new_message_ids.append(msg.message_id)
                     else:
                         try:
@@ -655,12 +673,12 @@ def webhook(req: https_fn.Request) -> https_fn.Response:
                             keyboard = get_task_keyboard(new_task['id'], new_task['status'], new_task)
 
                             # Send "Success" message with the main keyboard, then the task with its inline keyboard
-                            msg1 = bot.send_message(user_id, "Задача успешно создана!", reply_markup=get_main_keyboard())
+                            msg1 = bot.send_message(user_id, "Задача успешно создана!", reply_markup=get_main_keyboard(user_id))
                             msg2 = bot.send_message(user_id, reply_text, parse_mode='Markdown', reply_markup=keyboard)
                             new_message_ids.extend([msg1.message_id, msg2.message_id])
                         except Exception as e:
                             print(f"Ошибка при добавлении задачи через кнопку: {e}")
-                            err_msg = bot.send_message(user_id, "Произошла ошибка при создании задачи.", reply_markup=get_main_keyboard())
+                            err_msg = bot.send_message(user_id, "Произошла ошибка при создании задачи.", reply_markup=get_main_keyboard(user_id))
                             new_message_ids.append(err_msg.message_id)
 
                     # Save the IDs of the messages just sent, so the next command can clean them up.
@@ -686,7 +704,7 @@ def webhook(req: https_fn.Request) -> https_fn.Response:
                     state_data = chat_state.get("data", {})
                     task_id = state_data.get("comment_task_id")
                     original_message_id = state_data.get("comment_task_message_id")
-                    
+
                     new_message_ids = []
 
                     try:
@@ -694,19 +712,19 @@ def webhook(req: https_fn.Request) -> https_fn.Response:
                     except Exception: pass
 
                     if not comment_text:
-                         msg = bot.send_message(user_id, "Комментарий не может быть пустым.", reply_markup=get_main_keyboard())
+                         msg = bot.send_message(user_id, "Комментарий не может быть пустым.", reply_markup=get_main_keyboard(user_id))
                          new_message_ids.append(msg.message_id)
                     else:
                         try:
                             user_info = update.message.from_user
                             author = f"@{user_info.username}" if user_info.username else user_info.first_name or "Unknown User"
-                            
+
                             if task_manager.add_comment_to_task(task_id, comment_text, author):
                                 task = task_manager.get_task_by_id(task_id)
                                 if task:
                                     new_text = format_task_message(task)
                                     keyboard = get_task_keyboard(task_id, task['status'], task)
-                                    
+
                                     # Try to update the original message if it exists
                                     message_updated = False
                                     if original_message_id:
@@ -716,38 +734,39 @@ def webhook(req: https_fn.Request) -> https_fn.Response:
                                             message_updated = True
                                         except Exception as e:
                                             print(f"Failed to edit original message: {e}")
-                                    
+
                                     if not message_updated:
                                          msg = bot.send_message(user_id, new_text, parse_mode='Markdown', reply_markup=keyboard)
                                          new_message_ids.append(msg.message_id)
-                                    
-                                    success_msg = bot.send_message(user_id, "Комментарий добавлен!", reply_markup=get_main_keyboard())
+
+                                    success_msg = bot.send_message(user_id, "Комментарий добавлен!", reply_markup=get_main_keyboard(user_id))
                                     new_message_ids.append(success_msg.message_id)
                             else:
-                                err_msg = bot.send_message(user_id, "Ошибка при добавлении комментария. Задача не найдена.", reply_markup=get_main_keyboard())
+                                err_msg = bot.send_message(user_id, "Ошибка при добавлении комментария. Задача не найдена.", reply_markup=get_main_keyboard(user_id))
                                 new_message_ids.append(err_msg.message_id)
 
                         except Exception as e:
                             print(f"Error adding comment: {e}")
-                            err_msg = bot.send_message(user_id, "Произошла ошибка при добавлении комментария.", reply_markup=get_main_keyboard())
+                            err_msg = bot.send_message(user_id, "Произошла ошибка при добавлении комментария.", reply_markup=get_main_keyboard(user_id))
                             new_message_ids.append(err_msg.message_id)
-                    
+
                     # Clean up state
                     cleaned_data = dict(state_data)
                     cleaned_data.pop("comment_task_id", None)
                     cleaned_data.pop("comment_task_message_id", None)
                     cleaned_data['last_task_list_message_ids'] = new_message_ids
                     task_manager.set_user_state(user_id, "idle", data=cleaned_data)
-                    
+
                     return https_fn.Response(json.dumps({'status': 'ok'}), status=200, headers={'Content-Type': 'application/json'})
 
-                if update.message.text.startswith("/start"):
+                text = update.message.text
+                if text.startswith("/start"):
                     handle_start_command(bot, update.message)
                     return https_fn.Response(json.dumps({'status': 'ok'}), status=200, headers={'Content-Type': 'application/json'})
-                elif update.message.text.startswith("/help") or update.message.text == "❓ Помощь":
+                elif text.startswith("/help") or text == BTN_HELP:
                     send_welcome_and_help(bot, update.message)
                     return https_fn.Response(json.dumps({'status': 'ok'}), status=200, headers={'Content-Type': 'application/json'})
-                elif update.message.text == "❇️ Создать задачу":
+                elif text == BTN_CREATE:
                     # Clean up previous messages first
                     chat_state = task_manager.get_user_state(user_id) or {}
                     old_message_ids = chat_state.get("data", {}).get("last_task_list_message_ids", [])
@@ -765,26 +784,26 @@ def webhook(req: https_fn.Request) -> https_fn.Response:
                         print(f"Could not delete user command message: {e}")
 
                     # Now, proceed with the original logic
-                    sent_msg = bot.send_message(user_id, "Пожалуйста, введите описание задачи:", reply_markup=get_main_keyboard())
+                    sent_msg = bot.send_message(user_id, "Пожалуйста, введите описание задачи:", reply_markup=get_main_keyboard(user_id))
 
                     # Store the ID of this prompt message so it can be cleaned up by the next action.
                     current_data = chat_state.get("data", {})
                     current_data['last_task_list_message_ids'] = [sent_msg.message_id]
                     task_manager.set_user_state(user_id, "awaiting_task_description", data=current_data)
                     return https_fn.Response(json.dumps({'status': 'ok'}), status=200, headers={'Content-Type': 'application/json'})
-                elif update.message.text == "🔥 Открытые задачи":
+                elif text.startswith(BTN_OPEN):
                     show_tasks(bot, update.message, status=task_manager.STATUS_NEW)
                     return https_fn.Response(json.dumps({'status': 'ok'}), status=200, headers={'Content-Type': 'application/json'})
-                elif update.message.text == "👨‍💻 Задачи в работе":
+                elif text.startswith(BTN_IN_PROGRESS):
                     show_tasks(bot, update.message, status=task_manager.STATUS_IN_PROGRESS)
                     return https_fn.Response(json.dumps({'status': 'ok'}), status=200, headers={'Content-Type': 'application/json'})
-                elif update.message.text == "✅ Задачи выполненные":
+                elif text.startswith(BTN_DONE):
                     show_tasks(bot, update.message, status=task_manager.STATUS_DONE)
                     return https_fn.Response(json.dumps({'status': 'ok'}), status=200, headers={'Content-Type': 'application/json'})
-                elif update.message.text == "🗄️ Архивные задачи":
+                elif text.startswith(BTN_ARCHIVED):
                     show_tasks(bot, update.message, status=task_manager.STATUS_ARCHIVED)
                     return https_fn.Response(json.dumps({'status': 'ok'}), status=200, headers={'Content-Type': 'application/json'})
-                elif update.message.text.startswith("/new"):
+                elif text.startswith("/new"):
                     add_new_task(bot, update.message)
                     return https_fn.Response(json.dumps({'status': 'ok'}), status=200, headers={'Content-Type': 'application/json'})
             elif update.callback_query:
@@ -796,4 +815,3 @@ def webhook(req: https_fn.Request) -> https_fn.Response:
     except Exception as e:
         print(f"Error processing update: {e}")
         return https_fn.Response("Error", status=500)
-
