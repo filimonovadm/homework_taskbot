@@ -130,14 +130,15 @@ class TestMain(unittest.TestCase):
         mock_button_create = MagicMock(spec=main.types.KeyboardButton, text=main.BTN_CREATE)
         mock_button_open = MagicMock(spec=main.types.KeyboardButton, text=f"{main.BTN_OPEN} (2)")
         mock_button_in_progress = MagicMock(spec=main.types.KeyboardButton, text=f"{main.BTN_IN_PROGRESS} (1)")
-        mock_button_done = MagicMock(spec=main.types.KeyboardButton, text=f"{main.BTN_DONE} (1)")
-        mock_button_archived = MagicMock(spec=main.types.KeyboardButton, text=f"{main.BTN_ARCHIVED} (1)")
+        mock_button_done = MagicMock(spec=main.types.KeyboardButton, text=main.BTN_DONE)
+        mock_button_archived = MagicMock(spec=main.types.KeyboardButton, text=main.BTN_ARCHIVED)
+        mock_button_statistics = MagicMock(spec=main.types.KeyboardButton, text=main.BTN_STATISTICS)
         mock_button_help = MagicMock(spec=main.types.KeyboardButton, text=main.BTN_HELP)
 
         mock_keyboard.keyboard = [
-            [mock_button_create, mock_button_open],
-            [mock_button_in_progress, mock_button_done],
-            [mock_button_archived, mock_button_help]
+            [mock_button_create],
+            [mock_button_open, mock_button_in_progress],
+            [mock_button_done, mock_button_archived, mock_button_statistics, mock_button_help]
         ]
         
         # Patch the actual ReplyKeyboardMarkup and KeyboardButton creation
@@ -148,8 +149,9 @@ class TestMain(unittest.TestCase):
                     if text == main.BTN_CREATE: return mock_button_create
                     if text == f"{main.BTN_OPEN} (2)": return mock_button_open
                     if text == f"{main.BTN_IN_PROGRESS} (1)": return mock_button_in_progress
-                    if text == f"{main.BTN_DONE} (1)": return mock_button_done
-                    if text == f"{main.BTN_ARCHIVED} (1)": return mock_button_archived
+                    if text == main.BTN_DONE: return mock_button_done
+                    if text == main.BTN_ARCHIVED: return mock_button_archived
+                    if text == main.BTN_STATISTICS: return mock_button_statistics
                     if text == main.BTN_HELP: return mock_button_help
                     return MagicMock(spec=main.types.KeyboardButton, text=text) # Fallback
 
@@ -162,9 +164,10 @@ class TestMain(unittest.TestCase):
 
                 self.assertIn(f"{main.BTN_OPEN} (2)", button_texts)
                 self.assertIn(f"{main.BTN_IN_PROGRESS} (1)", button_texts)
-                self.assertIn(f"{main.BTN_DONE} (1)", button_texts)
-                self.assertIn(f"{main.BTN_ARCHIVED} (1)", button_texts)
+                self.assertIn(main.BTN_DONE, button_texts)
+                self.assertIn(main.BTN_ARCHIVED, button_texts)
                 self.assertIn(main.BTN_CREATE, button_texts)
+                self.assertIn(main.BTN_STATISTICS, button_texts)
                 self.assertIn(main.BTN_HELP, button_texts)
                 mock_get_all_tasks.assert_called_once_with(chat_id)
 
@@ -279,7 +282,7 @@ class TestWebhookLogic(unittest.TestCase):
         old_bot_message_ids = [98, 99]
 
         mock_bot = mock_telebot.TeleBot.return_value
-        self._create_mock_update("👨‍💻 Задачи в работе", chat_id=chat_id, message_id=user_message_id)
+        self._create_mock_update("👨‍💻 В работе", chat_id=chat_id, message_id=user_message_id)
         
         mock_task_manager.get_user_state.return_value = {
             "state": "idle",

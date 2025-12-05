@@ -48,7 +48,7 @@ class TestHeaderText(unittest.TestCase):
         mock_task_manager.get_tasks.return_value = tasks
         mock_task_manager.STATUS_NEW = task_manager.STATUS_NEW
         
-        self._create_mock_update("🔥 Открытые задачи")
+        self._create_mock_update("🔥 Открытые")
         
         mock_request = MagicMock(method="POST")
         main.webhook(mock_request)
@@ -58,7 +58,7 @@ class TestHeaderText(unittest.TestCase):
         # The first call might be deleting messages, then sending the header.
         # We look for the call with the expected text.
         
-        expected_header = "🔥 *Открытые задачи (5):*"
+        expected_header = "🔥 *Открытые (5):*"
         found = False
         for call in mock_bot.send_message.call_args_list:
             args, kwargs = call
@@ -79,12 +79,12 @@ class TestHeaderText(unittest.TestCase):
         mock_task_manager.get_tasks.return_value = tasks
         mock_task_manager.STATUS_IN_PROGRESS = task_manager.STATUS_IN_PROGRESS
         
-        self._create_mock_update("👨‍💻 Задачи в работе")
+        self._create_mock_update("👨‍💻 В работе")
         
         mock_request = MagicMock(method="POST")
         main.webhook(mock_request)
         
-        expected_header = "👨‍💻 *Задачи в работе (2):*"
+        expected_header = "👨‍💻 *В работе (2):*"
         found = False
         for call in mock_bot.send_message.call_args_list:
             args, kwargs = call
@@ -105,12 +105,12 @@ class TestHeaderText(unittest.TestCase):
         mock_task_manager.get_tasks.return_value = tasks
         mock_task_manager.STATUS_ARCHIVED = task_manager.STATUS_ARCHIVED
         
-        self._create_mock_update("🗄️ Архивные задачи")
+        self._create_mock_update("🗄️ Архив")
         
         mock_request = MagicMock(method="POST")
         main.webhook(mock_request)
         
-        expected_header = "🗄️ *Архивные задачи (10):*"
+        expected_header = "🗄️ *Архив (10):*"
         found = False
         for call in mock_bot.send_message.call_args_list:
             args, kwargs = call

@@ -13,11 +13,12 @@ MOSCOW_TZ = timezone(timedelta(hours=3))
 
 # --- Constants ---
 BTN_CREATE = "❇️ Создать задачу"
-BTN_OPEN = "🔥 Открытые задачи"
-BTN_IN_PROGRESS = "👨‍💻 Задачи в работе"
-BTN_DONE = "✅ Задачи выполненные"
-BTN_ARCHIVED = "🗄️ Архивные задачи"
-BTN_HELP = "❓ Помощь"
+BTN_OPEN = "🔥 Открытые"
+BTN_IN_PROGRESS = "👨‍💻 В работе"
+BTN_DONE = "✅ Готово"
+BTN_ARCHIVED = "🗄️ Архив"
+BTN_STATISTICS = "📊"
+BTN_HELP = "❓"
 
 HELP_TEXT = (
     "Привет! Я — ваш персональный менеджер задач. Я помогу вам отслеживать домашние дела и ничего не забывать.\n\n"
@@ -29,6 +30,7 @@ HELP_TEXT = (
     f"  - `{BTN_IN_PROGRESS}`: Список задач, которые уже кто-то выполняет.\n"
     f"  - `{BTN_DONE}`: Показывает успешно завершенные задачи.\n"
     f"  - `{BTN_ARCHIVED}`: Список задач, которые были убраны в архив.\n"
+    f"  - `{BTN_STATISTICS}`: Показывает общую статистику по задачам.\n"
     f"  - `{BTN_HELP}`: Отображает это справочное сообщение.\n\n"
     "🔄 *Жизненный цикл задачи:*\n"
     "  - `🆕 Новая`: Задача только создана.\n"
@@ -204,18 +206,19 @@ def get_main_keyboard(chat_id: int):
         print(f"Error fetching tasks for keyboard counts: {e}")
         count_open = count_in_progress = count_done = count_archived = 0
 
-    keyboard = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
+    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
 
     button_create_task = types.KeyboardButton(BTN_CREATE)
     button_all_tasks = types.KeyboardButton(f"{BTN_OPEN} ({count_open})")
     button_in_progress_tasks = types.KeyboardButton(f"{BTN_IN_PROGRESS} ({count_in_progress})")
-    button_done_tasks = types.KeyboardButton(f"{BTN_DONE} ({count_done})")
-    button_archived_tasks = types.KeyboardButton(f"{BTN_ARCHIVED} ({count_archived})")
+    button_done_tasks = types.KeyboardButton(BTN_DONE)
+    button_archived_tasks = types.KeyboardButton(BTN_ARCHIVED)
+    button_statistics = types.KeyboardButton(BTN_STATISTICS)
     button_help = types.KeyboardButton(BTN_HELP)
 
-    keyboard.add(button_create_task, button_all_tasks)
-    keyboard.add(button_in_progress_tasks, button_done_tasks)
-    keyboard.add(button_archived_tasks, button_help)
+    keyboard.row(button_create_task)
+    keyboard.row(button_all_tasks, button_in_progress_tasks)
+    keyboard.row(button_done_tasks, button_archived_tasks, button_statistics, button_help)
     return keyboard
 
 def handle_start_command(bot, message):
@@ -361,19 +364,19 @@ def show_tasks(bot, message, status: str | None = None):
         # 2. Get tasks to display
         if status == task_manager.STATUS_NEW:
             tasks_to_show = task_manager.get_tasks(chat_id, status=task_manager.STATUS_NEW)
-            header_text = f"🔥 *Открытые задачи ({len(tasks_to_show)}):*"
+            header_text = f"🔥 *Открытые ({len(tasks_to_show)}):*"
             no_tasks_text = "Новых задач нет. Отличная работа! ✨"
         elif status == task_manager.STATUS_ARCHIVED:
             tasks_to_show = task_manager.get_tasks(chat_id, status=task_manager.STATUS_ARCHIVED)
-            header_text = f"🗄️ *Архивные задачи ({len(tasks_to_show)}):*"
+            header_text = f"🗄️ *Архив ({len(tasks_to_show)}):*"
             no_tasks_text = "Архивных задач нет. ✨"
         elif status == task_manager.STATUS_IN_PROGRESS:
             tasks_to_show = task_manager.get_tasks(chat_id, status=status)
-            header_text = f"👨‍💻 *Задачи в работе ({len(tasks_to_show)}):*"
+            header_text = f"👨‍💻 *В работе ({len(tasks_to_show)}):*"
             no_tasks_text = "Нет задач в работе. ✨"
         elif status == task_manager.STATUS_DONE:
             tasks_to_show = task_manager.get_tasks(chat_id, status=status)
-            header_text = f"✅ *Задачи выполненные ({len(tasks_to_show)}):*"
+            header_text = f"✅ *Готово ({len(tasks_to_show)}):*"
             no_tasks_text = "Нет выполненных задач. ✨"
         elif status:
             tasks_to_show = task_manager.get_tasks(chat_id, status=status)
@@ -407,6 +410,83 @@ def show_tasks(bot, message, status: str | None = None):
         current_data = chat_state.get("data", {})
         current_data['last_task_list_message_ids'] = new_message_ids
         task_manager.set_user_state(chat_id, chat_state.get("state", "idle"), data=current_data)
+
+def show_statistics(bot, message):
+    """Собирает и показывает статистику по задачам."""
+    chat_id = message.chat.id
+    new_message_ids = []
+
+    # 1. Clean up old messages
+    chat_state = task_manager.get_user_state(chat_id) or {}
+    old_message_ids = chat_state.get("data", {}).get("last_task_list_message_ids", [])
+    if old_message_ids:
+        for msg_id in old_message_ids:
+            try:
+                bot.delete_message(chat_id, msg_id)
+            except Exception as e:
+                print(f"Could not delete message {msg_id}: {e}")
+
+    try:
+        bot.delete_message(chat_id, message.message_id)
+    except Exception as e:
+        print(f"Could not delete user command message: {e}")
+
+    try:
+        tasks = task_manager.get_all_tasks(chat_id)
+        
+        total_tasks = len(tasks)
+        status_counts = {
+            task_manager.STATUS_NEW: 0,
+            task_manager.STATUS_IN_PROGRESS: 0,
+            task_manager.STATUS_DONE: 0,
+            task_manager.STATUS_ARCHIVED: 0
+        }
+        total_time_seconds = 0.0
+        total_rating = 0
+        rated_tasks_count = 0
+
+        for task in tasks:
+            status = task.get('status')
+            if status in status_counts:
+                status_counts[status] += 1
+            
+            total_time_seconds += task.get('accumulated_time_seconds', 0)
+            
+            rating = task.get('rating')
+            if rating:
+                total_rating += rating
+                rated_tasks_count += 1
+        
+        avg_rating = (total_rating / rated_tasks_count) if rated_tasks_count > 0 else 0
+        
+        stats_text = (
+            f"📊 *Статистика задач*\n\n"
+            f"Всего задач: *{total_tasks}*\n"
+            f"----------------------\n"
+            f"🆕 Новые: {status_counts[task_manager.STATUS_NEW]}\n"
+            f"👨‍💻 В работе: {status_counts[task_manager.STATUS_IN_PROGRESS]}\n"
+            f"✅ Выполненные: {status_counts[task_manager.STATUS_DONE]}\n"
+            f"🗄️ Архивные: {status_counts[task_manager.STATUS_ARCHIVED]}\n"
+            f"----------------------\n"
+            f"⏱️ {format_accumulated_time(total_time_seconds)}\n"
+        )
+        
+        if rated_tasks_count > 0:
+            stats_text += f"⭐ Средняя оценка: {avg_rating:.1f} ({rated_tasks_count} оценок)"
+
+        sent_msg = bot.send_message(chat_id, stats_text, parse_mode='Markdown', reply_markup=get_main_keyboard(chat_id))
+        new_message_ids.append(sent_msg.message_id)
+
+    except Exception as e:
+        print(f"Ошибка при формировании статистики: {e}")
+        err_msg = bot.send_message(chat_id, "Произошла ошибка при получении статистики.", reply_markup=get_main_keyboard(chat_id))
+        new_message_ids.append(err_msg.message_id)
+
+    # Save state
+    final_data = chat_state.get("data", {})
+    final_data['last_task_list_message_ids'] = new_message_ids
+    task_manager.set_user_state(chat_id, "idle", data=final_data)
+
 
 def handle_callback_query(bot, call):
     """Обрабатывает нажатия на инлайн-кнопки."""
@@ -813,6 +893,9 @@ def webhook(req: https_fn.Request) -> https_fn.Response:
                     return https_fn.Response(json.dumps({'status': 'ok'}), status=200, headers={'Content-Type': 'application/json'})
                 elif text.startswith(BTN_ARCHIVED):
                     show_tasks(bot, update.message, status=task_manager.STATUS_ARCHIVED)
+                    return https_fn.Response(json.dumps({'status': 'ok'}), status=200, headers={'Content-Type': 'application/json'})
+                elif text == BTN_STATISTICS:
+                    show_statistics(bot, update.message)
                     return https_fn.Response(json.dumps({'status': 'ok'}), status=200, headers={'Content-Type': 'application/json'})
                 elif text.startswith("/new"):
                     add_new_task(bot, update.message)
