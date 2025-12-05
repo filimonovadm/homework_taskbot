@@ -17,7 +17,7 @@ HELP_TEXT = (
     "🤖 *Работа в групповых чатах:*\n"
     "Чтобы я мог эффективно работать в группе, мне нужны права администратора. Это позволит мне удалять сообщения и управлять задачами.\n\n"
     "⬇️ *Основные команды (клавиатура внизу):*\n"
-    "  - `➕ Создать задачу`: Интерактивное создание новой задачи.\n"
+    "  - `❇️ Создать задачу`: Интерактивное создание новой задачи.\n"
     "  - `🔥 Открытые задачи`: Показывает все новые задачи, ожидающие исполнителя.\n"
     "  - `👨‍💻 Задачи в работе`: Список задач, которые уже кто-то выполняет.\n"
     "  - `✅ Задачи выполненные`: Показывает успешно завершенные задачи.\n"
@@ -34,6 +34,7 @@ HELP_TEXT = (
     "  - `✅ Завершить`: Отметить задачу как выполненную.\n"
     "  - `⭐ Оценить`: Поставить оценку выполненной задаче (от 1 до 5).\n"
     "  - `🔄 Отменить`: Вернуть задачу из статуса `в работе` в `новые`.\n"
+    "  - `💬 Добавить коммент`: Добавить комментарий к задаче в работе.\n"
     "  - `⏪ Вернуть в работу`: Вернуть задачу из `выполненных` обратно `в работу`.\n"
     "  - `🗄️ Архивировать`: Убрать выполненную задачу в архив.\n"
     "  - `❌ Удалить`: Полностью удалить задачу (только для новых).\n\n"
@@ -186,7 +187,7 @@ def format_task_message(task: dict) -> str:
 def get_main_keyboard():
     """Создает основную клавиатуру с кнопками 'Создать задачу', 'Открытые задачи', 'Задачи в работе', 'Задачи выполненные', 'Архивные задачи' и 'Помощь'."""
     keyboard = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
-    button_create_task = types.KeyboardButton("➕ Создать задачу")
+    button_create_task = types.KeyboardButton("❇️ Создать задачу")
     button_all_tasks = types.KeyboardButton("🔥 Открытые задачи")
     button_in_progress_tasks = types.KeyboardButton("👨‍💻 Задачи в работе")
     button_done_tasks = types.KeyboardButton("✅ Задачи выполненные")
@@ -343,27 +344,27 @@ def show_tasks(bot, message, status: str | None = None):
         # 2. Get tasks to display
         if status == task_manager.STATUS_NEW:
             tasks_to_show = task_manager.get_tasks(chat_id, status=task_manager.STATUS_NEW)
-            header_text = "🔥 *Открытые задачи:*"
+            header_text = f"🔥 *Открытые задачи ({len(tasks_to_show)}):*"
             no_tasks_text = "Новых задач нет. Отличная работа! ✨"
         elif status == task_manager.STATUS_ARCHIVED:
             tasks_to_show = task_manager.get_tasks(chat_id, status=task_manager.STATUS_ARCHIVED)
-            header_text = "🗄️ *Архивные задачи:*"
+            header_text = f"🗄️ *Архивные задачи ({len(tasks_to_show)}):*"
             no_tasks_text = "Архивных задач нет. ✨"
         elif status == task_manager.STATUS_IN_PROGRESS:
             tasks_to_show = task_manager.get_tasks(chat_id, status=status)
-            header_text = "👨‍💻 *Задачи в работе:*"
+            header_text = f"👨‍💻 *Задачи в работе ({len(tasks_to_show)}):*"
             no_tasks_text = "Нет задач в работе. ✨"
         elif status == task_manager.STATUS_DONE:
             tasks_to_show = task_manager.get_tasks(chat_id, status=status)
-            header_text = "✅ *Задачи выполненные:*"
+            header_text = f"✅ *Задачи выполненные ({len(tasks_to_show)}):*"
             no_tasks_text = "Нет выполненных задач. ✨"
         elif status:
             tasks_to_show = task_manager.get_tasks(chat_id, status=status)
-            header_text = f"Задачи со статусом '{status}':*"
+            header_text = f"Задачи со статусом '{status}' ({len(tasks_to_show)}):*"
             no_tasks_text = f"Нет задач со статусом '{status}'. Отличная работа! ✨"
         else:
             tasks_to_show = task_manager.get_all_tasks(chat_id)
-            header_text = "🔥 *Все задачи:*"
+            header_text = f"🔥 *Все задачи ({len(tasks_to_show)}):*"
             no_tasks_text = "Нет задач. Отличная работа! ✨"
 
         # 3. Send new messages and collect their IDs
@@ -746,7 +747,7 @@ def webhook(req: https_fn.Request) -> https_fn.Response:
                 elif update.message.text.startswith("/help") or update.message.text == "❓ Помощь":
                     send_welcome_and_help(bot, update.message)
                     return https_fn.Response(json.dumps({'status': 'ok'}), status=200, headers={'Content-Type': 'application/json'})
-                elif update.message.text == "➕ Создать задачу":
+                elif update.message.text == "❇️ Создать задачу":
                     # Clean up previous messages first
                     chat_state = task_manager.get_user_state(user_id) or {}
                     old_message_ids = chat_state.get("data", {}).get("last_task_list_message_ids", [])
