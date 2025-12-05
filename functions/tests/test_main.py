@@ -109,7 +109,11 @@ class TestWebhookLogic(unittest.TestCase):
         main._bot_instance = None
         self.os_patcher = patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "test-token"})
         self.os_patcher.start()
-        main.initialize_app()
+        try:
+            main.initialize_app()
+        except ValueError:
+            pass
+        main._firebase_app_initialized = True
 
     def tearDown(self):
         self.os_patcher.stop()
@@ -146,22 +150,29 @@ class TestWebhookLogic(unittest.TestCase):
         main.webhook(mock_request)
 
         mock_bot.edit_message_text.assert_called_once()
-        _, kwargs = mock_bot.edit_message_text.call_args
-        self.assertEqual(kwargs['text'], "Оцените выполненную задачу:")
+        args, kwargs = mock_bot.edit_message_text.call_args
+        text_arg = args[0] if args else kwargs.get('text')
+        self.assertEqual(text_arg, "Оцените выполненную задачу:")
         
         reply_markup = kwargs['reply_markup']
         self.assertIsInstance(reply_markup, main.types.InlineKeyboardMarkup)
         
-        buttons = reply_markup.keyboard[0]
-        self.assertEqual(len(buttons), 5)
-        self.assertEqual(buttons[0]['text'], "⭐")
-        self.assertEqual(buttons[0]['callback_data'], f"set_rating_1_{task_id}")
-        self.assertEqual(buttons[4]['text'], "⭐⭐⭐⭐⭐")
-        self.assertEqual(buttons[4]['callback_data'], f"set_rating_5_{task_id}")
+        all_buttons = [btn for row in reply_markup.keyboard for btn in row]
+        self.assertEqual(len(all_buttons), 5)
+        self.assertEqual(all_buttons[0].text, "⭐")
+        self.assertEqual(all_buttons[0].callback_data, f"set_rating_1_{task_id}")
+        self.assertEqual(all_buttons[4].text, "⭐⭐⭐⭐⭐")
+        self.assertEqual(all_buttons[4].callback_data, f"set_rating_5_{task_id}")
 
     def test_set_rating_callback_updates_task(self, mock_https_fn, mock_telebot, mock_task_manager):
         mock_telebot.reset_mock()
         mock_task_manager.reset_mock()
+        # Configure constants on the mock to match real values
+        mock_task_manager.STATUS_NEW = task_manager.STATUS_NEW
+        mock_task_manager.STATUS_IN_PROGRESS = task_manager.STATUS_IN_PROGRESS
+        mock_task_manager.STATUS_DONE = task_manager.STATUS_DONE
+        mock_task_manager.STATUS_ARCHIVED = task_manager.STATUS_ARCHIVED
+
         mock_bot = mock_telebot.TeleBot.return_value
         task_id = "task-xyz"
         rating = 4
@@ -178,11 +189,13 @@ class TestWebhookLogic(unittest.TestCase):
         mock_task_manager.rate_task.assert_called_once_with(task_id, rating)
         mock_bot.edit_message_text.assert_called_once()
         
-        _, kwargs = mock_bot.edit_message_text.call_args
-        self.assertIn("Оценка: ⭐⭐⭐⭐", kwargs['text'])
+        args, kwargs = mock_bot.edit_message_text.call_args
+        text_arg = args[0] if args else kwargs.get('text')
+        self.assertIn("Оценка: ⭐⭐⭐⭐", text_arg)
         
         reply_markup = kwargs['reply_markup']
-        self.assertTrue(any(btn['callback_data'] == f"archive_{task_id}" for btn in reply_markup.keyboard[0]))
+        all_buttons = [btn for row in reply_markup.keyboard for btn in row]
+        self.assertTrue(any(btn.callback_data == f"archive_{task_id}" for btn in all_buttons))
 
     def test_show_tasks_deletes_old_messages(self, mock_https_fn, mock_telebot, mock_task_manager):
         mock_telebot.reset_mock()

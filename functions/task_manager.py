@@ -187,3 +187,23 @@ def rate_task(task_id: str, rating: int) -> bool:
         return True
     print(f"Task {task_id} not found or not in 'done' status.")
     return False
+
+
+def add_comment_to_task(task_id: str, comment_text: str, author: str) -> bool:
+    """Adds a comment to a task."""
+    db = firestore.client()
+    doc_ref = db.collection(TASKS_COLLECTION).document(task_id)
+    doc = doc_ref.get()
+    if not doc.exists:
+        return False
+    
+    comment = {
+        "text": comment_text,
+        "author": author,
+        "created_at": datetime.now().isoformat()
+    }
+    
+    # We use array_union to atomically add the comment
+    doc_ref.update({"comments": firestore.firestore.ArrayUnion([comment])})
+    return True
+    

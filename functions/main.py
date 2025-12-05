@@ -60,7 +60,9 @@ def get_task_keyboard(task_id: str, status: str, task: dict = None):
     elif status == task_manager.STATUS_IN_PROGRESS:
         button_done = types.InlineKeyboardButton("✅ Завершить", callback_data=f"done_{task_id}")
         button_reopen_new = types.InlineKeyboardButton("🔄 Отменить", callback_data=f"reopen_new_{task_id}")
+        button_add_comment = types.InlineKeyboardButton("💬 Добавить коммент", callback_data=f"add_comment_{task_id}")
         keyboard.add(button_done, button_reopen_new)
+        keyboard.add(button_add_comment)
     elif status == task_manager.STATUS_DONE:
         button_archive = types.InlineKeyboardButton("🗄️ Архивировать", callback_data=f"archive_{task_id}")
         button_reopen_in_progress = types.InlineKeyboardButton("⏪ Вернуть в работу", callback_data=f"reopen_in_progress_{task_id}")
@@ -164,6 +166,18 @@ def format_task_message(task: dict) -> str:
     if task.get("rating") is not None:
         stars = "⭐" * task["rating"]
         text += f"\n`Оценка: {stars}`"
+
+    # --- Comments ---
+    if task.get('comments'):
+        text += "\n\n*Комментарии:*"
+        for comment in task['comments']:
+            try:
+                comment_dt = datetime.fromisoformat(comment['created_at'])
+                local_comment_dt = convert_utc_to_local(comment_dt)
+                date_str = local_comment_dt.strftime('%d.%m %H:%M')
+            except ValueError:
+                date_str = "??"
+            text += f"\n— {comment['text']} \n  `({comment['author']}, {date_str})`"
 
 
     return text
@@ -473,6 +487,31 @@ def handle_callback_query(bot, call):
             return
 
         # --- Other Task Action Callbacks ---
+        if call.data.startswith("add_comment_"):
+             task_id = call.data.split('_')[2]
+             
+             # Clean up previous messages first
+             chat_state = task_manager.get_user_state(call.message.chat.id) or {}
+             old_message_ids = chat_state.get("data", {}).get("last_task_list_message_ids", [])
+
+             if old_message_ids:
+                 for msg_id in old_message_ids:
+                     try:
+                         bot.delete_message(call.message.chat.id, msg_id)
+                     except Exception as e:
+                         print(f"Could not delete message {msg_id}: {e}")
+             
+             sent_msg = bot.send_message(call.message.chat.id, "Введите комментарий к задаче:", reply_markup=get_main_keyboard())
+             
+             current_data = chat_state.get("data", {})
+             current_data['comment_task_id'] = task_id
+             current_data['comment_task_message_id'] = call.message.message_id # We might want to update this message later
+             current_data['last_task_list_message_ids'] = [sent_msg.message_id]
+             
+             task_manager.set_user_state(call.message.chat.id, "awaiting_comment", data=current_data)
+             bot.answer_callback_query(call.id)
+             return
+
         parts = call.data.split('_') 
         task_id = parts[-1]
         action_prefix = "_".join(parts[:-1]) # This is already correctly 'reopen_in_progress' for the button.
@@ -614,6 +653,76 @@ def webhook(req: https_fn.Request) -> https_fn.Response:
                     final_data['last_task_list_message_ids'] = new_message_ids
                     task_manager.set_user_state(user_id, "idle", data=final_data)
 
+                    return https_fn.Response(json.dumps({'status': 'ok'}), status=200, headers={'Content-Type': 'application/json'})
+
+                if user_state and user_state.get("state") == "awaiting_comment":
+                    # Handler for adding a comment
+                    chat_state = user_state or {}
+                    old_message_ids = chat_state.get("data", {}).get("last_task_list_message_ids", [])
+                    if old_message_ids:
+                        for msg_id in old_message_ids:
+                            try:
+                                bot.delete_message(user_id, msg_id)
+                            except Exception as e:
+                                print(f"Could not delete message {msg_id}: {e}")
+
+                    comment_text = update.message.text
+                    state_data = chat_state.get("data", {})
+                    task_id = state_data.get("comment_task_id")
+                    original_message_id = state_data.get("comment_task_message_id")
+                    
+                    new_message_ids = []
+
+                    try:
+                        bot.delete_message(chat_id=user_id, message_id=update.message.message_id)
+                    except Exception: pass
+
+                    if not comment_text:
+                         msg = bot.send_message(user_id, "Комментарий не может быть пустым.", reply_markup=get_main_keyboard())
+                         new_message_ids.append(msg.message_id)
+                    else:
+                        try:
+                            user_info = update.message.from_user
+                            author = f"@{user_info.username}" if user_info.username else user_info.first_name or "Unknown User"
+                            
+                            if task_manager.add_comment_to_task(task_id, comment_text, author):
+                                task = task_manager.get_task_by_id(task_id)
+                                if task:
+                                    new_text = format_task_message(task)
+                                    keyboard = get_task_keyboard(task_id, task['status'], task)
+                                    
+                                    # Try to update the original message if it exists
+                                    message_updated = False
+                                    if original_message_id:
+                                        try:
+                                            bot.edit_message_text(chat_id=user_id, message_id=original_message_id,
+                                                                  text=new_text, parse_mode='Markdown', reply_markup=keyboard)
+                                            message_updated = True
+                                        except Exception as e:
+                                            print(f"Failed to edit original message: {e}")
+                                    
+                                    if not message_updated:
+                                         msg = bot.send_message(user_id, new_text, parse_mode='Markdown', reply_markup=keyboard)
+                                         new_message_ids.append(msg.message_id)
+                                    
+                                    success_msg = bot.send_message(user_id, "Комментарий добавлен!", reply_markup=get_main_keyboard())
+                                    new_message_ids.append(success_msg.message_id)
+                            else:
+                                err_msg = bot.send_message(user_id, "Ошибка при добавлении комментария. Задача не найдена.", reply_markup=get_main_keyboard())
+                                new_message_ids.append(err_msg.message_id)
+
+                        except Exception as e:
+                            print(f"Error adding comment: {e}")
+                            err_msg = bot.send_message(user_id, "Произошла ошибка при добавлении комментария.", reply_markup=get_main_keyboard())
+                            new_message_ids.append(err_msg.message_id)
+                    
+                    # Clean up state
+                    cleaned_data = dict(state_data)
+                    cleaned_data.pop("comment_task_id", None)
+                    cleaned_data.pop("comment_task_message_id", None)
+                    cleaned_data['last_task_list_message_ids'] = new_message_ids
+                    task_manager.set_user_state(user_id, "idle", data=cleaned_data)
+                    
                     return https_fn.Response(json.dumps({'status': 'ok'}), status=200, headers={'Content-Type': 'application/json'})
 
                 if update.message.text.startswith("/start"):
