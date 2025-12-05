@@ -157,7 +157,7 @@ def update_task_status(task_id: str, new_status: str, user_info: Any) -> bool:
                 print(f"Could not parse in_progress_at '{in_progress_at_str}': {e}")
     if new_status == STATUS_IN_PROGRESS:
         update_data["in_progress_at"] = now.isoformat()
-        if user_info:
+        if current_status == STATUS_NEW and user_info:
             update_data["assigned_to"] = f"{user_info.first_name} (@{user_info.username})"
         if "completed_at" in current_task:
             update_data["completed_at"] = firestore.DELETE_FIELD
