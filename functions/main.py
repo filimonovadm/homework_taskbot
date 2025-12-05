@@ -32,6 +32,7 @@ HELP_TEXT = (
     "  - `▶️ В работу`: Взять новую задачу на себя.\n"
     "  - `🗓️ Срок`: Установить или изменить дедлайн.\n"
     "  - `✅ Завершить`: Отметить задачу как выполненную.\n"
+    "  - `⭐ Оценить`: Поставить оценку выполненной задаче (от 1 до 5).\n"
     "  - `🔄 Отменить`: Вернуть задачу из статуса `в работе` в `новые`.\n"
     "  - `⏪ Вернуть в работу`: Вернуть задачу из `выполненных` обратно `в работу`.\n"
     "  - `🗄️ Архивировать`: Убрать выполненную задачу в архив.\n"
@@ -48,7 +49,7 @@ def convert_utc_to_local(utc_dt: datetime) -> datetime:
 
 # --- Bot Handlers (copied from bot.py) ---
 
-def get_task_keyboard(task_id: str, status: str):
+def get_task_keyboard(task_id: str, status: str, task: dict = None):
     """Создает инлайн-клавиатуру для задачи в зависимости от ее статуса."""
     keyboard = types.InlineKeyboardMarkup()
     if status == task_manager.STATUS_NEW:
@@ -64,6 +65,11 @@ def get_task_keyboard(task_id: str, status: str):
         button_archive = types.InlineKeyboardButton("🗄️ Архивировать", callback_data=f"archive_{task_id}")
         button_reopen_in_progress = types.InlineKeyboardButton("⏪ Вернуть в работу", callback_data=f"reopen_in_progress_{task_id}")
         keyboard.add(button_archive, button_reopen_in_progress)
+
+        # Allow rating only if the task has not been rated yet.
+        if task and task.get("rating") is None:
+            button_rate = types.InlineKeyboardButton("⭐ Оценить", callback_data=f"rate_{task_id}")
+            keyboard.add(button_rate)
     return keyboard
 
 def format_accumulated_time(total_seconds: float) -> str:
@@ -153,6 +159,12 @@ def format_task_message(task: dict) -> str:
 
     if time_spent_str:
         text += f"\n`{time_spent_str}`"
+    
+    # --- Rating ---
+    if task.get("rating") is not None:
+        stars = "⭐" * task["rating"]
+        text += f"\n`Оценка: {stars}`"
+
 
     return text
 
@@ -274,7 +286,7 @@ def add_new_task(bot, message):
             created_by_user = f"@{user_info.username}" if user_info.username else user_info.first_name or "Unknown User"
             new_task = task_manager.add_task(chat_id, task_text, created_by=created_by_user)
             reply_text = format_task_message(new_task)
-            keyboard = get_task_keyboard(new_task['id'], new_task['status'])
+            keyboard = get_task_keyboard(new_task['id'], new_task['status'], new_task)
 
             # Send "Success" message with the main keyboard, then the task with its inline keyboard
             msg1 = bot.send_message(chat_id, "Задача успешно создана!", reply_markup=get_main_keyboard())
@@ -349,7 +361,7 @@ def show_tasks(bot, message, status: str | None = None):
             new_message_ids.append(header_msg.message_id)
             for task in tasks_to_show:
                 task_text = format_task_message(task)
-                keyboard = get_task_keyboard(task['id'], task['status'])
+                keyboard = get_task_keyboard(task['id'], task['status'], task)
                 task_msg = bot.send_message(chat_id, task_text, parse_mode='Markdown', reply_markup=keyboard)
                 new_message_ids.append(task_msg.message_id)
 
@@ -367,7 +379,42 @@ def show_tasks(bot, message, status: str | None = None):
 def handle_callback_query(bot, call):
     """Обрабатывает нажатия на инлайн-кнопки."""
     try:
-        # Calendar callback handling
+        # --- Rating Callbacks ---
+        if call.data.startswith("rate_"):
+            task_id = call.data.split('_')[1]
+            rating_keyboard = types.InlineKeyboardMarkup()
+            buttons = []
+            for i in range(1, 6):
+                buttons.append(types.InlineKeyboardButton("⭐" * i, callback_data=f"set_rating_{i}_{task_id}"))
+            rating_keyboard.add(*buttons)
+            bot.edit_message_text("Оцените выполненную задачу:", chat_id=call.message.chat.id,
+                                  message_id=call.message.message_id, reply_markup=rating_keyboard)
+            bot.answer_callback_query(call.id)
+            return
+
+        if call.data.startswith("set_rating_"):
+            parts = call.data.split('_')
+            rating = int(parts[2])
+            task_id = parts[3]
+            
+            success = task_manager.rate_task(task_id, rating)
+            if success:
+                task = task_manager.get_task_by_id(task_id)
+                if task:
+                    new_text = format_task_message(task)
+                    # Revert to the standard "done" keyboard
+                    new_keyboard = get_task_keyboard(task_id, task['status'], task)
+                    bot.edit_message_text(new_text, chat_id=call.message.chat.id,
+                                          message_id=call.message.message_id, reply_markup=new_keyboard,
+                                          parse_mode='Markdown')
+                    bot.answer_callback_query(call.id, f"Вы поставили оценку: {rating} ⭐")
+                else:
+                    bot.answer_callback_query(call.id, "Не удалось найти задачу после оценки.")
+            else:
+                bot.answer_callback_query(call.id, "Не удалось оценить задачу.")
+            return
+
+        # --- Calendar Callbacks ---
         if call.data.startswith('cbcal_'):
             result, key, step = DetailedTelegramCalendar(locale='ru').process(call.data)
             user_state = task_manager.get_user_state(call.from_user.id)
@@ -393,7 +440,7 @@ def handle_callback_query(bot, call):
                     return
 
                 new_text = format_task_message(task)
-                new_keyboard = get_task_keyboard(task_id, task['status'])
+                new_keyboard = get_task_keyboard(task_id, task['status'], task)
 
                 message_updated = False
                 if original_message_id:
@@ -425,48 +472,19 @@ def handle_callback_query(bot, call):
                 task_manager.set_user_state(call.from_user.id, "idle", data=cleaned_state_data)
             return
 
-        parts = call.data.split('_') # Split into all parts
-
-        action_prefix = "_".join(parts[:-1])
+        # --- Other Task Action Callbacks ---
+        parts = call.data.split('_') 
         task_id = parts[-1]
-
-        if action_prefix == "set_deadline":
-            calendar, step = DetailedTelegramCalendar(locale='ru', current_date=datetime.now().date()).build()
-            sent_calendar_msg = bot.send_message(call.message.chat.id, f"Выберите {LSTEP[step]}", reply_markup=calendar)
-            
-            existing_state = task_manager.get_user_state(call.from_user.id) or {}
-            current_data = dict(existing_state.get("data") or {})
-            
-            message_ids_to_clean = current_data.get('last_task_list_message_ids', [])
-            message_ids_to_clean.append(sent_calendar_msg.message_id)
-            
-            current_data.update({
-                "deadline_task_id": task_id,
-                "deadline_task_message_id": call.message.message_id,
-                "last_task_list_message_ids": message_ids_to_clean
-            })
-            
-            task_manager.set_user_state(call.from_user.id, "calendar_set_deadline", current_data)
-            return
-
-        # Reconstruct the action string based on the number of parts
-        if len(parts) == 2: # e.g., "take_UUID", "done_UUID", "delete_UUID", "archive_UUID"
-            action_full = parts[0]
-        elif len(parts) == 3 and parts[0] == "reopen": # e.g., "reopen_new_UUID"
-            action_full = f"{parts[0]}_{parts[1]}" # Reconstruct "reopen_new"
-        elif len(parts) == 4 and parts[0] == "reopen" and parts[1] == "in" and parts[2] == "progress": # e.g., "reopen_in_progress_UUID"
-            action_full = f"{parts[0]}_{parts[1]}_{parts[2]}" # Reconstruct "reopen_in_progress"
-        else:
-            action_full = "unknown" # Fallback for unexpected formats
+        action_prefix = "_".join(parts[:-1]) # This is already correctly 'reopen_in_progress' for the button.
 
         user_info = call.from_user
 
         new_status = None
-        if action_full == "take":
+        if action_prefix == "take":
             new_status = task_manager.STATUS_IN_PROGRESS
-        elif action_full == "done":
+        elif action_prefix == "done":
             new_status = task_manager.STATUS_DONE
-        elif action_full == "archive":
+        elif action_prefix == "archive":
             task_to_archive = task_manager.get_task_by_id(task_id)
             if task_to_archive:
                 created_by_user = f"@{user_info.username}" if user_info.username else user_info.first_name or "Unknown User"
@@ -478,7 +496,7 @@ def handle_callback_query(bot, call):
             else:
                 bot.answer_callback_query(call.id, "Не удалось найти задачу.")
                 return
-        elif action_full == "delete":
+        elif action_prefix == "delete":
             success = task_manager.delete_task(task_id)
             if success:
                 bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id,
@@ -486,15 +504,13 @@ def handle_callback_query(bot, call):
                 bot.answer_callback_query(call.id, "Задача удалена.")
             else:
                 bot.answer_callback_query(call.id, "Не удалось удалить задачу.")
-            return # Exit after deleting
-        elif action_full == "reopen_new":
+            return
+        elif action_prefix == "reopen_new":
             new_status = task_manager.STATUS_NEW
-        elif action_full == "reopen_in_progress":
+        elif action_prefix == "reopen_in_progress":
             new_status = task_manager.STATUS_IN_PROGRESS
 
         if not new_status:
-            # This case will be hit for "set_deadline" and other unhandled callbacks.
-            # We already handled "set_deadline" and calendar callbacks, so we can ignore this.
             return
 
         success = task_manager.update_task_status(task_id, new_status, user_info)
@@ -503,7 +519,7 @@ def handle_callback_query(bot, call):
             task = task_manager.get_task_by_id(task_id)
             if task:
                 new_text = format_task_message(task)
-                new_keyboard = get_task_keyboard(task_id, new_status)
+                new_keyboard = get_task_keyboard(task_id, new_status, task)
                 bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id,
                                       text=new_text, parse_mode='Markdown', reply_markup=new_keyboard)
                 bot.answer_callback_query(call.id, f"Статус задачи обновлен на '{new_status}'")
@@ -581,7 +597,7 @@ def webhook(req: https_fn.Request) -> https_fn.Response:
                             created_by_user = f"@{user_info.username}" if user_info.username else user_info.first_name or "Unknown User"
                             new_task = task_manager.add_task(user_id, task_text, created_by=created_by_user)
                             reply_text = format_task_message(new_task)
-                            keyboard = get_task_keyboard(new_task['id'], new_task['status'])
+                            keyboard = get_task_keyboard(new_task['id'], new_task['status'], new_task)
 
                             # Send "Success" message with the main keyboard, then the task with its inline keyboard
                             msg1 = bot.send_message(user_id, "Задача успешно создана!", reply_markup=get_main_keyboard())
