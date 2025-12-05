@@ -512,6 +512,21 @@ def handle_callback_query(bot, call):
              bot.answer_callback_query(call.id)
              return
 
+        if call.data.startswith("set_deadline_"):
+            task_id = call.data.split('_')[2]
+            calendar, step = DetailedTelegramCalendar(locale='ru').build()
+            bot.send_message(call.message.chat.id, f"Выберите {LSTEP[step]}", reply_markup=calendar)
+            
+            # Save state
+            user_state = task_manager.get_user_state(call.from_user.id)
+            state_data = (user_state or {}).get("data", {}) or {}
+            state_data['deadline_task_id'] = task_id
+            state_data['deadline_task_message_id'] = call.message.message_id
+            
+            task_manager.set_user_state(call.from_user.id, "calendar_set_deadline", data=state_data)
+            bot.answer_callback_query(call.id)
+            return
+
         parts = call.data.split('_') 
         task_id = parts[-1]
         action_prefix = "_".join(parts[:-1]) # This is already correctly 'reopen_in_progress' for the button.
