@@ -570,6 +570,17 @@ def handle_callback_query(bot, call):
                 bot.answer_callback_query(call.id, "Не удалось найти задачу.")
                 return
         elif action_prefix == "delete":
+            task_to_delete = task_manager.get_task_by_id(task_id)
+            if not task_to_delete:
+                bot.answer_callback_query(call.id, "Задача не найдена.")
+                return
+
+            current_user = f"@{user_info.username}" if user_info.username else user_info.first_name or "Unknown User"
+
+            if task_to_delete.get("created_by") != current_user:
+                bot.answer_callback_query(call.id, "Удалить задачу может только ее автор.")
+                return
+
             success = task_manager.delete_task(task_id)
             if success:
                 bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id,
