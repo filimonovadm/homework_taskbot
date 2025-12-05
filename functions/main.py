@@ -37,7 +37,7 @@ HELP_TEXT = (
     "  - `🗄️ Архивирована`: Задача убрана в архив.\n\n"
     "⚙️ *Действия с задачами (кнопки под сообщением):*\n"
     "  - `▶️ В работу`: Взять новую задачу на себя.\n"
-    "  - `🗓️ Срок`: Установить или изменить дедлайн.\n"
+    "  - `🗓️ Срок`: Установить или изменить срок.\n"
     "  - `✅ Завершить`: Отметить задачу как выполненную.\n"
     "  - `⭐ Оценить`: Поставить оценку выполненной задаче (от 1 до 5).\n"
     "  - `🔄 Отменить`: Вернуть задачу из статуса `в работе` в `новые`.\n"
@@ -146,9 +146,9 @@ def format_task_message(task: dict) -> str:
         try:
             deadline_datetime = datetime.fromisoformat(task['deadline_at'])
             local_deadline_datetime = convert_utc_to_local(deadline_datetime)
-            text += f"\n`Дедлайн: {local_deadline_datetime.strftime('%d.%m.%Y')}`"
+            text += f"\n`Срок: {local_deadline_datetime.strftime('%d.%m.%Y')}`"
         except ValueError:
-            text += f"\n`Дедлайн: {task['deadline_at']}`"
+            text += f"\n`Срок: {task['deadline_at']}`"
 
     # --- Completion Date (only show if actually completed) ---
     if task.get('completed_at'):
@@ -592,7 +592,7 @@ def handle_callback_query(bot, call):
             task = task_manager.get_task_by_id(task_id)
             if task:
                 new_text = format_task_message(task)
-                new_keyboard = get_task_keyboard(task_id, new_status, task)
+                new_keyboard = get_task_keyboard(task_id, task['status'], task)
                 bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id,
                                       text=new_text, parse_mode='Markdown', reply_markup=new_keyboard)
                 bot.answer_callback_query(call.id, f"Статус задачи обновлен на '{new_status}'")
