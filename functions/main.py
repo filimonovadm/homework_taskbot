@@ -341,8 +341,8 @@ def show_tasks(bot, message, status: str | None = None):
 
     try:
         # 2. Get tasks to display
-        if status == "open":
-            tasks_to_show = task_manager.get_tasks(chat_id, status="open")
+        if status == task_manager.STATUS_NEW:
+            tasks_to_show = task_manager.get_tasks(chat_id, status=task_manager.STATUS_NEW)
             header_text = "🔥 *Открытые задачи:*"
             no_tasks_text = "Новых задач нет. Отличная работа! ✨"
         elif status == task_manager.STATUS_ARCHIVED:
@@ -772,7 +772,7 @@ def webhook(req: https_fn.Request) -> https_fn.Response:
                     task_manager.set_user_state(user_id, "awaiting_task_description", data=current_data)
                     return https_fn.Response(json.dumps({'status': 'ok'}), status=200, headers={'Content-Type': 'application/json'})
                 elif update.message.text == "🔥 Открытые задачи":
-                    show_tasks(bot, update.message, status="open")
+                    show_tasks(bot, update.message, status=task_manager.STATUS_NEW)
                     return https_fn.Response(json.dumps({'status': 'ok'}), status=200, headers={'Content-Type': 'application/json'})
                 elif update.message.text == "👨‍💻 Задачи в работе":
                     show_tasks(bot, update.message, status=task_manager.STATUS_IN_PROGRESS)
