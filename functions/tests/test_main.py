@@ -100,6 +100,74 @@ class TestMain(unittest.TestCase):
         formatted_message = main.format_task_message(mock_task)
         self.assertNotIn("Оценка:", formatted_message)
 
+    def test_format_task_message_with_renamed_deadline(self):
+        """Tests that the deadline field is renamed to 'Срок'."""
+        mock_task = {
+            "id": "102",
+            "text": "Task with deadline",
+            "status": task_manager.STATUS_NEW,
+            "deadline_at": "2025-12-31T23:59:59"
+        }
+        formatted_message = main.format_task_message(mock_task)
+        self.assertIn("Срок: ", formatted_message)
+        self.assertNotIn("Дедлайн: ", formatted_message)
+
+    @patch('main.task_manager.get_all_tasks')
+    def test_get_main_keyboard_with_task_counts(self, mock_get_all_tasks):
+        """Tests that the main keyboard buttons display correct task counts."""
+        mock_get_all_tasks.return_value = [
+            {"status": task_manager.STATUS_NEW},  # 1 new
+            {"status": task_manager.STATUS_NEW},  # 2 new
+            {"status": task_manager.STATUS_IN_PROGRESS}, # 1 in progress
+            {"status": task_manager.STATUS_DONE}, # 1 done
+            {"status": task_manager.STATUS_ARCHIVED}, # 1 archived
+        ]
+
+        chat_id = 123
+
+        # Create a mock for ReplyKeyboardMarkup and its buttons
+        mock_keyboard = MagicMock(spec=main.types.ReplyKeyboardMarkup)
+        mock_button_create = MagicMock(spec=main.types.KeyboardButton, text=main.BTN_CREATE)
+        mock_button_open = MagicMock(spec=main.types.KeyboardButton, text=f"{main.BTN_OPEN} (2)")
+        mock_button_in_progress = MagicMock(spec=main.types.KeyboardButton, text=f"{main.BTN_IN_PROGRESS} (1)")
+        mock_button_done = MagicMock(spec=main.types.KeyboardButton, text=f"{main.BTN_DONE} (1)")
+        mock_button_archived = MagicMock(spec=main.types.KeyboardButton, text=f"{main.BTN_ARCHIVED} (1)")
+        mock_button_help = MagicMock(spec=main.types.KeyboardButton, text=main.BTN_HELP)
+
+        mock_keyboard.keyboard = [
+            [mock_button_create, mock_button_open],
+            [mock_button_in_progress, mock_button_done],
+            [mock_button_archived, mock_button_help]
+        ]
+        
+        # Patch the actual ReplyKeyboardMarkup and KeyboardButton creation
+        with patch('main.types.ReplyKeyboardMarkup', return_value=mock_keyboard) as MockReplyKeyboardMarkup:
+            with patch('main.types.KeyboardButton') as MockKeyboardButton:
+                # Make MockKeyboardButton return the pre-defined mock buttons based on their text
+                def side_effect_for_kb_button(text):
+                    if text == main.BTN_CREATE: return mock_button_create
+                    if text == f"{main.BTN_OPEN} (2)": return mock_button_open
+                    if text == f"{main.BTN_IN_PROGRESS} (1)": return mock_button_in_progress
+                    if text == f"{main.BTN_DONE} (1)": return mock_button_done
+                    if text == f"{main.BTN_ARCHIVED} (1)": return mock_button_archived
+                    if text == main.BTN_HELP: return mock_button_help
+                    return MagicMock(spec=main.types.KeyboardButton, text=text) # Fallback
+
+                MockKeyboardButton.side_effect = side_effect_for_kb_button
+
+                keyboard = main.get_main_keyboard(chat_id)
+                
+                # Extract button texts from the returned (mocked) keyboard
+                button_texts = [button.text for row in keyboard.keyboard for button in row]
+
+                self.assertIn(f"{main.BTN_OPEN} (2)", button_texts)
+                self.assertIn(f"{main.BTN_IN_PROGRESS} (1)", button_texts)
+                self.assertIn(f"{main.BTN_DONE} (1)", button_texts)
+                self.assertIn(f"{main.BTN_ARCHIVED} (1)", button_texts)
+                self.assertIn(main.BTN_CREATE, button_texts)
+                self.assertIn(main.BTN_HELP, button_texts)
+                mock_get_all_tasks.assert_called_once_with(chat_id)
+
 @patch('main.task_manager')
 @patch('main.telebot')
 @patch('main.https_fn')
@@ -126,6 +194,9 @@ class TestWebhookLogic(unittest.TestCase):
         mock_update.message.chat.id = chat_id
         mock_update.message.message_id = message_id
         mock_update.callback_query = None
+        mock_update.message.from_user = MagicMock()
+        mock_update.message.from_user.username = "testuser"
+        mock_update.message.from_user.first_name = "Test"
         main.telebot.types.Update.de_json.return_value = mock_update
         return mock_update
 
@@ -136,6 +207,9 @@ class TestWebhookLogic(unittest.TestCase):
         mock_update.callback_query.data = data
         mock_update.callback_query.message.chat.id = chat_id
         mock_update.callback_query.message.message_id = message_id
+        mock_update.callback_query.from_user = MagicMock()
+        mock_update.callback_query.from_user.username = "testuser"
+        mock_update.callback_query.from_user.first_name = "Test"
         main.telebot.types.Update.de_json.return_value = mock_update
         return mock_update
 
@@ -229,6 +303,70 @@ class TestWebhookLogic(unittest.TestCase):
         mock_task_manager.set_user_state.assert_called_once()
         _, kwargs = mock_task_manager.set_user_state.call_args
         self.assertEqual(kwargs['data']['last_task_list_message_ids'], [201, 202])
+
+    def test_delete_task_only_by_author(self, mock_https_fn, mock_telebot, mock_task_manager):
+        mock_telebot.reset_mock()
+        mock_task_manager.reset_mock()
+        mock_bot = mock_telebot.TeleBot.return_value
+        task_id = "task-to-delete"
+        author_username = "taskauthor"
+        non_author_username = "anotheruser"
+
+        # Scenario 1: Author tries to delete the task
+        mock_task_manager.get_task_by_id.return_value = {
+            "id": task_id, "text": "Authored Task", "status": task_manager.STATUS_NEW, "created_by": f"@{author_username}"
+        }
+        mock_task_manager.delete_task.return_value = True
+
+        mock_callback_update = self._create_mock_callback_update(f"delete_{task_id}")
+        mock_callback_update.callback_query.from_user.username = author_username
+        mock_callback_update.callback_query.from_user.first_name = "TaskAuthor"
+        main.telebot.types.Update.de_json.return_value = mock_callback_update
+
+        mock_request = MagicMock(method="POST")
+        main.webhook(mock_request)
+
+        mock_task_manager.delete_task.assert_called_once_with(task_id)
+        mock_bot.edit_message_text.assert_called_once_with(chat_id=mock_callback_update.callback_query.message.chat.id,
+                                                            message_id=mock_callback_update.callback_query.message.message_id,
+                                                            text="Задача успешно удалена.", parse_mode='Markdown')
+        mock_bot.answer_callback_query.assert_called_once_with(mock_callback_update.callback_query.id, "Задача удалена.")
+
+        mock_task_manager.reset_mock()
+        mock_bot.reset_mock()
+
+        # Scenario 2: Non-author tries to delete the task
+        mock_task_manager.get_task_by_id.return_value = {
+            "id": task_id, "text": "Authored Task", "status": task_manager.STATUS_NEW, "created_by": f"@{author_username}"
+        }
+
+        mock_callback_update = self._create_mock_callback_update(f"delete_{task_id}")
+        mock_callback_update.callback_query.from_user.username = non_author_username
+        mock_callback_update.callback_query.from_user.first_name = "AnotherUser"
+        main.telebot.types.Update.de_json.return_value = mock_callback_update
+
+        main.webhook(mock_request)
+
+        mock_task_manager.delete_task.assert_not_called() # Should not call delete_task
+        mock_bot.answer_callback_query.assert_called_once_with(mock_callback_update.callback_query.id, "Удалить задачу может только ее автор.")
+        mock_bot.edit_message_text.assert_not_called() # Should not edit message
+
+        mock_task_manager.reset_mock()
+        mock_bot.reset_mock()
+
+        # Scenario 3: Task not found
+        mock_task_manager.get_task_by_id.return_value = None
+
+        mock_callback_update = self._create_mock_callback_update(f"delete_{task_id}")
+        mock_callback_update.callback_query.from_user.username = author_username
+        mock_callback_update.callback_query.from_user.first_name = "TaskAuthor"
+        main.telebot.types.Update.de_json.return_value = mock_callback_update
+
+        main.webhook(mock_request)
+        mock_task_manager.delete_task.assert_not_called()
+        mock_bot.answer_callback_query.assert_called_once_with(mock_callback_update.callback_query.id, "Задача не найдена.")
+        mock_bot.edit_message_text.assert_not_called()
+
 
 if __name__ == '__main__':
     unittest.main()

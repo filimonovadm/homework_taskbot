@@ -158,6 +158,7 @@ class TestUpdateTaskStatusWithTimeAccumulation(unittest.TestCase):
         self.assertIs(update_args["completed_at"], task_manager.firestore.DELETE_FIELD)
         self.assertNotIn("accumulated_time_seconds", update_args)
         self.assertNotIn("rating", update_args)
+        self.assertNotIn("assigned_to", update_args) # Should not re-assign user when reopening
         self.mock_document_ref.update.reset_mock()
 
         # 7. State: Task is IN_PROGRESS again, with 3600s accumulated and a new start time.
