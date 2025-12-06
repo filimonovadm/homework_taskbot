@@ -3,17 +3,13 @@ import uuid
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 
-from models import Task, STATUS_NEW, STATUS_IN_PROGRESS, STATUS_DONE, STATUS_ARCHIVED
+import models
 from repositories import TaskRepository
 
 # Initialize Repository
 repo = TaskRepository()
 
-# Status constants (re-exported for compatibility)
-STATUS_NEW = STATUS_NEW
-STATUS_IN_PROGRESS = STATUS_IN_PROGRESS
-STATUS_DONE = STATUS_DONE
-STATUS_ARCHIVED = STATUS_ARCHIVED
+
 
 
 def set_user_state(user_id: int, state: str, data: Dict[str, Any] = None):
@@ -31,12 +27,12 @@ def get_next_task_number(chat_id: int) -> int:
     return repo.get_next_task_number(chat_id)
 
 
-def add_task(chat_id: int, text: str, created_by: str, deadline_at: str | None = None) -> Task:
+def add_task(chat_id: int, text: str, created_by: str, deadline_at: str | None = None) -> models.Task:
     """Adds a new task to the Firestore collection for a specific chat."""
     task_id = str(uuid.uuid4())
     task_number = repo.get_next_task_number(chat_id)
-    
-    new_task = Task(
+
+    new_task = models.Task(
         id=task_id,
         chat_id=chat_id,
         task_number=task_number,
@@ -44,22 +40,22 @@ def add_task(chat_id: int, text: str, created_by: str, deadline_at: str | None =
         created_by=created_by,
         deadline_at=deadline_at
     )
-    
+
     repo.add_task(new_task)
     return new_task
 
 
-def get_tasks(chat_id: int, status: str | None = None) -> List[Task]:
+def get_tasks(chat_id: int, status: str | None = None) -> List[models.Task]:
     """Returns a list of tasks for a specific chat, optionally filtered by status."""
     return repo.get_tasks_by_chat(chat_id, status)
 
 
-def get_all_tasks(chat_id: int) -> List[Task]:
+def get_all_tasks(chat_id: int) -> List[models.Task]:
     """Returns all tasks for a specific chat, regardless of status."""
     return repo.get_tasks_by_chat(chat_id, None)
 
 
-def get_task_by_id(task_id: str) -> Task | None:
+def get_task_by_id(task_id: str) -> models.Task | None:
     """Finds a task by its unique ID."""
     return repo.get_task(task_id)
 
@@ -88,25 +84,29 @@ def update_task_status(task_id: str, new_status: str, user_name: str, user_handl
     if not current_task:
         return False
 
-    current_status = current_task.status
-    update_data = {}
-    
+    # Optimization: No-op if status is not changing
+    if current_task.status == new_status:
+        return True
+
     allowed_transitions = {
-        STATUS_NEW: [STATUS_IN_PROGRESS, STATUS_ARCHIVED],
-        STATUS_IN_PROGRESS: [STATUS_NEW, STATUS_DONE, STATUS_ARCHIVED],
-        STATUS_DONE: [STATUS_IN_PROGRESS, STATUS_ARCHIVED],
-        STATUS_ARCHIVED: [],
+        models.STATUS_NEW: {models.STATUS_IN_PROGRESS, models.STATUS_ARCHIVED},
+        models.STATUS_IN_PROGRESS: {models.STATUS_NEW, models.STATUS_DONE, models.STATUS_ARCHIVED},
+        models.STATUS_DONE: {models.STATUS_IN_PROGRESS, models.STATUS_ARCHIVED},
+        models.STATUS_ARCHIVED: set(),
     }
 
-    if new_status not in allowed_transitions.get(current_status, []):
-        print(f"Invalid status transition from {current_status} to {new_status} for task {task_id}")
+    if new_status not in allowed_transitions.get(current_task.status, set()):
+        print(f"Invalid status transition from {current_task.status} to {new_status} for task {task_id}")
         return False
 
-    update_data["status"] = new_status
+    update_data = {"status": new_status}
     now = datetime.now()
 
-    # Time tracking logic
-    if current_status == STATUS_IN_PROGRESS and new_status != STATUS_IN_PROGRESS:
+    # 1. Handle "Exiting" IN_PROGRESS logic (Time Tracking)
+    if current_task.status == models.STATUS_IN_PROGRESS:
+        # Always remove in_progress_at when leaving this state
+        update_data["in_progress_at"] = firestore.DELETE_FIELD
+        
         in_progress_at_str = current_task.in_progress_at
         if in_progress_at_str:
             try:
@@ -114,45 +114,44 @@ def update_task_status(task_id: str, new_status: str, user_name: str, user_handl
                 session_seconds = (now - in_progress_dt).total_seconds()
                 current_accumulated = current_task.accumulated_time_seconds or 0
                 update_data["accumulated_time_seconds"] = current_accumulated + session_seconds
-                update_data["in_progress_at"] = firestore.DELETE_FIELD
             except (ValueError, TypeError) as e:
                 print(f"Could not parse in_progress_at '{in_progress_at_str}': {e}")
 
-    # Status specific updates
-    if new_status == STATUS_IN_PROGRESS:
-        update_data["in_progress_at"] = now.isoformat()
-        if current_status == STATUS_NEW and user_name:
-            # Format: "Name (@handle)" or just "Name"
-            assigned = f"{user_name} ({user_handle})" if user_handle else user_name
-            update_data["assigned_to"] = assigned
-        
-        if current_task.completed_at:
-             update_data["completed_at"] = firestore.DELETE_FIELD
-
-    elif new_status == STATUS_DONE:
-        update_data["completed_at"] = now.isoformat()
-        if current_task.rating is not None:
-            update_data["rating"] = None # Reset rating if moved back to done? Or just ensure it's clear.
-
-    elif new_status == STATUS_NEW:
-        if current_task.assigned_to:
-            update_data["assigned_to"] = firestore.DELETE_FIELD
-        if current_task.completed_at:
+    # 2. Handle "Entering" specific status logic
+    match new_status:
+        case models.STATUS_IN_PROGRESS:
+            update_data["in_progress_at"] = now.isoformat()
+            
+            # Update assignee if user data is provided (even if returning from Done)
+            if user_name:
+                assigned = f"{user_name} ({user_handle})" if user_handle else user_name
+                update_data["assigned_to"] = assigned
+            
+            # Cleanup potential leftovers from other states
             update_data["completed_at"] = firestore.DELETE_FIELD
 
-    return repo.update_task(task_id, update_data)
+        case models.STATUS_DONE:
+            update_data["completed_at"] = now.isoformat()
+            update_data["rating"] = firestore.DELETE_FIELD
 
+        case models.STATUS_NEW:
+            # Reset everything associated with progress
+            update_data["assigned_to"] = firestore.DELETE_FIELD
+            update_data["completed_at"] = firestore.DELETE_FIELD
+            update_data["rating"] = firestore.DELETE_FIELD
+
+    return repo.update_task(task_id, update_data)
 
 def rate_task(task_id: str, rating: int) -> bool:
     """Sets the rating for a completed task."""
     if not 1 <= rating <= 5:
         print(f"Invalid rating value: {rating}. Must be between 1 and 5.")
         return False
-    
+
     task = repo.get_task(task_id)
-    if task and task.status == STATUS_DONE:
+    if task and task.status == models.STATUS_DONE:
         return repo.update_task(task_id, {"rating": rating})
-    
+
     print(f"Task {task_id} not found or not in 'done' status.")
     return False
 
@@ -165,3 +164,4 @@ def add_comment_to_task(task_id: str, comment_text: str, author: str) -> bool:
         "created_at": datetime.now().isoformat()
     }
     return repo.add_comment(task_id, comment)
+
