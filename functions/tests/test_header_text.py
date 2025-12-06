@@ -3,13 +3,13 @@ from unittest.mock import patch, MagicMock
 import sys
 import os
 
-# Add the 'functions' directory to sys.path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Mock firebase_admin before it's used
+sys.modules['firebase_admin'] = MagicMock()
 
 import main
-import task_manager
+from models import Task, STATUS_NEW, STATUS_IN_PROGRESS, STATUS_DONE, STATUS_ARCHIVED
 
-@patch('main.task_manager')
+@patch('handlers.task_manager')
 @patch('main.telebot')
 @patch('main.https_fn')
 class TestHeaderText(unittest.TestCase):
@@ -44,19 +44,13 @@ class TestHeaderText(unittest.TestCase):
         mock_bot = mock_telebot.TeleBot.return_value
         
         # Mock 5 open tasks
-        tasks = [{"id": str(i), "text": f"Task {i}", "status": task_manager.STATUS_NEW, "rating": None} for i in range(5)]
+        tasks = [Task(id=str(i), chat_id=123, text=f"Task {i}", created_by="u", status=STATUS_NEW) for i in range(5)]
         mock_task_manager.get_tasks.return_value = tasks
-        mock_task_manager.STATUS_NEW = task_manager.STATUS_NEW
         
         self._create_mock_update("🔥 Открытые")
         
         mock_request = MagicMock(method="POST")
         main.webhook(mock_request)
-        
-        # Verify the header message
-        # We expect a call to send_message with the header
-        # The first call might be deleting messages, then sending the header.
-        # We look for the call with the expected text.
         
         expected_header = "🔥 *Открытые (5):*"
         found = False
@@ -75,9 +69,8 @@ class TestHeaderText(unittest.TestCase):
         mock_bot = mock_telebot.TeleBot.return_value
         
         # Mock 2 in progress tasks
-        tasks = [{"id": str(i), "text": f"Task {i}", "status": task_manager.STATUS_IN_PROGRESS, "rating": None} for i in range(2)]
+        tasks = [Task(id=str(i), chat_id=123, text=f"Task {i}", created_by="u", status=STATUS_IN_PROGRESS) for i in range(2)]
         mock_task_manager.get_tasks.return_value = tasks
-        mock_task_manager.STATUS_IN_PROGRESS = task_manager.STATUS_IN_PROGRESS
         
         self._create_mock_update("👨‍💻 В работе")
         
@@ -101,9 +94,8 @@ class TestHeaderText(unittest.TestCase):
         mock_bot = mock_telebot.TeleBot.return_value
         
         # Mock 10 archived tasks
-        tasks = [{"id": str(i), "text": f"Task {i}", "status": task_manager.STATUS_ARCHIVED, "rating": None} for i in range(10)]
+        tasks = [Task(id=str(i), chat_id=123, text=f"Task {i}", created_by="u", status=STATUS_ARCHIVED) for i in range(10)]
         mock_task_manager.get_tasks.return_value = tasks
-        mock_task_manager.STATUS_ARCHIVED = task_manager.STATUS_ARCHIVED
         
         self._create_mock_update("🗄️ Архив")
         

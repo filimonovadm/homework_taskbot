@@ -1,209 +1,167 @@
 from firebase_admin import firestore
 import uuid
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
-TASKS_COLLECTION = "tasks"
-USER_STATES_COLLECTION = "user_states"
-CHAT_COUNTERS_COLLECTION = "chat_counters"
+from models import Task, STATUS_NEW, STATUS_IN_PROGRESS, STATUS_DONE, STATUS_ARCHIVED
+from repositories import TaskRepository
 
-# Status constants
-STATUS_NEW = "новая"
-STATUS_IN_PROGRESS = "в работе"
-STATUS_DONE = "выполнена"
-STATUS_ARCHIVED = "архивирована"
+# Initialize Repository
+repo = TaskRepository()
+
+# Status constants (re-exported for compatibility)
+STATUS_NEW = STATUS_NEW
+STATUS_IN_PROGRESS = STATUS_IN_PROGRESS
+STATUS_DONE = STATUS_DONE
+STATUS_ARCHIVED = STATUS_ARCHIVED
 
 
 def set_user_state(user_id: int, state: str, data: Dict[str, Any] = None):
     """Sets the conversation state for a user."""
-    db = firestore.client()
-    doc_ref = db.collection(USER_STATES_COLLECTION).document(str(user_id))
-    doc_ref.set({"state": state, "data": data or {}})
+    repo.set_user_state(user_id, state, data)
 
 
 def get_user_state(user_id: int) -> Dict[str, Any] | None:
     """Gets the current conversation state for a user."""
-    db = firestore.client()
-    doc = db.collection(USER_STATES_COLLECTION).document(str(user_id)).get()
-    if doc.exists:
-        return doc.to_dict()
-    return None
-
-
-@firestore.transactional
-def _get_next_task_number_transaction(transaction, counter_ref):
-    """Transaction to get and increment the task number."""
-    snapshot = counter_ref.get(transaction=transaction)
-    current_number = snapshot.get("count") if snapshot.exists else 0
-    next_number = current_number + 1
-    transaction.set(counter_ref, {"count": next_number})
-    return next_number
+    return repo.get_user_state(user_id)
 
 
 def get_next_task_number(chat_id: int) -> int:
-    """
-    Gets the next available task number for a given chat, incrementing it atomically.
-    """
-    db = firestore.client()
-    counter_ref = db.collection(CHAT_COUNTERS_COLLECTION).document(str(chat_id))
-    transaction = db.transaction()
-    return _get_next_task_number_transaction(transaction, counter_ref)
+    """Gets the next available task number for a given chat."""
+    return repo.get_next_task_number(chat_id)
 
 
-def add_task(chat_id: int, text: str, created_by: str, deadline_at: str | None = None) -> Dict[str, Any]:
+def add_task(chat_id: int, text: str, created_by: str, deadline_at: str | None = None) -> Task:
     """Adds a new task to the Firestore collection for a specific chat."""
-    db = firestore.client()
     task_id = str(uuid.uuid4())
-    task_number = get_next_task_number(chat_id)
-    new_task = {
-        "id": task_id,
-        "chat_id": chat_id,
-        "task_number": task_number,
-        "text": text,
-        "status": STATUS_NEW,
-        "created_by": created_by,
-        "assigned_to": None,
-        "created_at": datetime.now().isoformat(),
-        "accumulated_time_seconds": 0,
-        "rating": None,
-    }
-    if deadline_at:
-        new_task["deadline_at"] = deadline_at
-    db.collection(TASKS_COLLECTION).document(task_id).set(new_task)
+    task_number = repo.get_next_task_number(chat_id)
+    
+    new_task = Task(
+        id=task_id,
+        chat_id=chat_id,
+        task_number=task_number,
+        text=text,
+        created_by=created_by,
+        deadline_at=deadline_at
+    )
+    
+    repo.add_task(new_task)
     return new_task
 
 
-def get_tasks(chat_id: int, status: str | None = None) -> List[Dict[str, Any]]:
+def get_tasks(chat_id: int, status: str | None = None) -> List[Task]:
     """Returns a list of tasks for a specific chat, optionally filtered by status."""
-    db = firestore.client()
-    tasks = []
-    query = db.collection(TASKS_COLLECTION).where("chat_id", "==", chat_id)
-    if status == "open":
-        query = query.where("status", "in", [STATUS_NEW, STATUS_IN_PROGRESS])
-    elif status:
-        query = query.where("status", "==", status)
-    docs = query.stream()
-    for doc in docs:
-        tasks.append(doc.to_dict())
-    return tasks
+    return repo.get_tasks_by_chat(chat_id, status)
 
 
-def get_all_tasks(chat_id: int) -> List[Dict[str, Any]]:
+def get_all_tasks(chat_id: int) -> List[Task]:
     """Returns all tasks for a specific chat, regardless of status."""
-    return get_tasks(chat_id=chat_id, status=None)
+    return repo.get_tasks_by_chat(chat_id, None)
 
 
-def get_task_by_id(task_id: str) -> Dict[str, Any] | None:
+def get_task_by_id(task_id: str) -> Task | None:
     """Finds a task by its unique ID."""
-    db = firestore.client()
-    doc = db.collection(TASKS_COLLECTION).document(task_id).get()
-    if doc.exists:
-        return doc.to_dict()
-    return None
+    return repo.get_task(task_id)
 
 
 def delete_task(task_id: str) -> bool:
     """Deletes a task by its unique ID."""
-    db = firestore.client()
-    doc_ref = db.collection(TASKS_COLLECTION).document(task_id)
-    doc = doc_ref.get()
-    if doc.exists:
-        doc_ref.delete()
-        return True
-    return False
+    return repo.delete_task(task_id)
 
 
 def update_task_deadline(task_id: str, deadline_at: str) -> bool:
     """Updates the deadline of a task."""
-    db = firestore.client()
-    doc_ref = db.collection(TASKS_COLLECTION).document(task_id)
-    if doc_ref.get().exists:
-        doc_ref.update({"deadline_at": deadline_at})
-        return True
-    return False
+    return repo.update_task(task_id, {"deadline_at": deadline_at})
 
 
-def update_task_status(task_id: str, new_status: str, user_info: Any) -> bool:
-    """Updates the status of a task and manages accumulated time."""
-    db = firestore.client()
-    doc_ref = db.collection(TASKS_COLLECTION).document(task_id)
-    doc = doc_ref.get()
-    if not doc.exists:
+def update_task_status(task_id: str, new_status: str, user_name: str, user_handle: str = "") -> bool:
+    """
+    Updates the status of a task and manages accumulated time.
+    
+    Args:
+        task_id: The ID of the task.
+        new_status: The new status to transition to.
+        user_name: Display name of the user performing the action.
+        user_handle: Optional handle (e.g. @username) for display.
+    """
+    current_task = repo.get_task(task_id)
+    if not current_task:
         return False
-    current_task = doc.to_dict()
-    current_status = current_task.get("status")
+
+    current_status = current_task.status
     update_data = {}
+    
     allowed_transitions = {
         STATUS_NEW: [STATUS_IN_PROGRESS, STATUS_ARCHIVED],
         STATUS_IN_PROGRESS: [STATUS_NEW, STATUS_DONE, STATUS_ARCHIVED],
         STATUS_DONE: [STATUS_IN_PROGRESS, STATUS_ARCHIVED],
         STATUS_ARCHIVED: [],
     }
+
     if new_status not in allowed_transitions.get(current_status, []):
         print(f"Invalid status transition from {current_status} to {new_status} for task {task_id}")
         return False
+
     update_data["status"] = new_status
     now = datetime.now()
+
+    # Time tracking logic
     if current_status == STATUS_IN_PROGRESS and new_status != STATUS_IN_PROGRESS:
-        in_progress_at_str = current_task.get("in_progress_at")
+        in_progress_at_str = current_task.in_progress_at
         if in_progress_at_str:
             try:
                 in_progress_dt = datetime.fromisoformat(in_progress_at_str)
                 session_seconds = (now - in_progress_dt).total_seconds()
-                current_accumulated = current_task.get("accumulated_time_seconds", 0)
+                current_accumulated = current_task.accumulated_time_seconds or 0
                 update_data["accumulated_time_seconds"] = current_accumulated + session_seconds
                 update_data["in_progress_at"] = firestore.DELETE_FIELD
             except (ValueError, TypeError) as e:
                 print(f"Could not parse in_progress_at '{in_progress_at_str}': {e}")
+
+    # Status specific updates
     if new_status == STATUS_IN_PROGRESS:
         update_data["in_progress_at"] = now.isoformat()
-        if current_status == STATUS_NEW and user_info:
-            update_data["assigned_to"] = f"{user_info.first_name} (@{user_info.username})"
-        if "completed_at" in current_task:
-            update_data["completed_at"] = firestore.DELETE_FIELD
+        if current_status == STATUS_NEW and user_name:
+            # Format: "Name (@handle)" or just "Name"
+            assigned = f"{user_name} ({user_handle})" if user_handle else user_name
+            update_data["assigned_to"] = assigned
+        
+        if current_task.completed_at:
+             update_data["completed_at"] = firestore.DELETE_FIELD
+
     elif new_status == STATUS_DONE:
         update_data["completed_at"] = now.isoformat()
-        if "rating" in current_task:
-            update_data["rating"] = None
+        if current_task.rating is not None:
+            update_data["rating"] = None # Reset rating if moved back to done? Or just ensure it's clear.
+
     elif new_status == STATUS_NEW:
-        if "assigned_to" in current_task:
+        if current_task.assigned_to:
             update_data["assigned_to"] = firestore.DELETE_FIELD
-        if "completed_at" in current_task:
+        if current_task.completed_at:
             update_data["completed_at"] = firestore.DELETE_FIELD
-    doc_ref.update(update_data)
-    return True
+
+    return repo.update_task(task_id, update_data)
 
 
 def rate_task(task_id: str, rating: int) -> bool:
     """Sets the rating for a completed task."""
-    db = firestore.client()
-    doc_ref = db.collection(TASKS_COLLECTION).document(task_id)
     if not 1 <= rating <= 5:
         print(f"Invalid rating value: {rating}. Must be between 1 and 5.")
         return False
-    task = doc_ref.get()
-    if task.exists and task.to_dict().get("status") == STATUS_DONE:
-        doc_ref.update({"rating": rating})
-        return True
+    
+    task = repo.get_task(task_id)
+    if task and task.status == STATUS_DONE:
+        return repo.update_task(task_id, {"rating": rating})
+    
     print(f"Task {task_id} not found or not in 'done' status.")
     return False
 
 
 def add_comment_to_task(task_id: str, comment_text: str, author: str) -> bool:
     """Adds a comment to a task."""
-    db = firestore.client()
-    doc_ref = db.collection(TASKS_COLLECTION).document(task_id)
-    doc = doc_ref.get()
-    if not doc.exists:
-        return False
-    
     comment = {
         "text": comment_text,
         "author": author,
         "created_at": datetime.now().isoformat()
     }
-    
-    # We use array_union to atomically add the comment
-    doc_ref.update({"comments": firestore.firestore.ArrayUnion([comment])})
-    return True
-    
+    return repo.add_comment(task_id, comment)
