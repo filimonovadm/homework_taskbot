@@ -2,20 +2,20 @@ import unittest
 from unittest.mock import patch, MagicMock
 import sys
 import os
-import telebot 
 
 # Mock firebase_admin before it's used
 sys.modules['firebase_admin'] = MagicMock()
 
 # Import from package (assuming PYTHONPATH includes 'functions')
 import main
-import handlers # Import handlers directly to inspect/patch
+import handlers  # Import handlers directly to inspect/patch
+from bot_provider import bot_provider
 from models import Task, STATUS_NEW, STATUS_IN_PROGRESS, STATUS_DONE, STATUS_ARCHIVED
 
 class TestWebhookLogic(unittest.TestCase):
 
     def setUp(self):
-        main._bot_instance = None
+        bot_provider._bot_instance = None
         self.os_patcher = patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "test-token"})
         self.os_patcher.start()
         try:
@@ -26,7 +26,7 @@ class TestWebhookLogic(unittest.TestCase):
 
     def tearDown(self):
         self.os_patcher.stop()
-        main._bot_instance = None
+        bot_provider._bot_instance = None
 
     def _create_mock_update(self, text, chat_id=123, message_id=100):
         mock_update = MagicMock()
@@ -56,10 +56,13 @@ class TestWebhookLogic(unittest.TestCase):
         return mock_update
 
     @patch('handlers.task_manager')
+    @patch('bot_provider.telebot')
+    @patch('update_processor.telebot')
     @patch('main.telebot')
     @patch('main.https_fn')
-    def test_rate_button_shows_rating_keyboard(self, mock_https_fn, mock_telebot, mock_task_manager):
-        mock_bot = mock_telebot.TeleBot.return_value
+    def test_rate_button_shows_rating_keyboard(self, mock_https_fn, mock_telebot_main, mock_telebot_processor, mock_telebot_provider, mock_task_manager):
+        mock_bot = mock_telebot_main.TeleBot.return_value
+        bot_provider._bot_instance = mock_bot
         task_id = "task-abc"
         self._create_mock_callback_update(f"rate_{task_id}")
 
@@ -77,16 +80,19 @@ class TestWebhookLogic(unittest.TestCase):
         self.assertEqual(len(all_buttons), 5)
 
     @patch('handlers.task_manager')
+    @patch('bot_provider.telebot')
+    @patch('update_processor.telebot')
     @patch('main.telebot')
     @patch('main.https_fn')
-    def test_set_rating_callback_updates_task(self, mock_https_fn, mock_telebot, mock_task_manager):
+    def test_set_rating_callback_updates_task(self, mock_https_fn, mock_telebot_main, mock_telebot_processor, mock_telebot_provider, mock_task_manager):
         # Setup constants
         mock_task_manager.STATUS_NEW = STATUS_NEW
         mock_task_manager.STATUS_IN_PROGRESS = STATUS_IN_PROGRESS
         mock_task_manager.STATUS_DONE = STATUS_DONE
         mock_task_manager.STATUS_ARCHIVED = STATUS_ARCHIVED
 
-        mock_bot = mock_telebot.TeleBot.return_value
+        mock_bot = mock_telebot_main.TeleBot.return_value
+        bot_provider._bot_instance = mock_bot
         task_id = "task-xyz"
         rating = 4
         
@@ -110,14 +116,17 @@ class TestWebhookLogic(unittest.TestCase):
 
     @patch('handlers.utils')
     @patch('handlers.task_manager')
+    @patch('bot_provider.telebot')
+    @patch('update_processor.telebot')
     @patch('main.telebot')
     @patch('main.https_fn')
-    def test_show_tasks_deletes_old_messages(self, mock_https_fn, mock_telebot, mock_task_manager, mock_utils):
+    def test_show_tasks_deletes_old_messages(self, mock_https_fn, mock_telebot_main, mock_telebot_processor, mock_telebot_provider, mock_task_manager, mock_utils):
         # This test now verifies that `main` correctly delegates to `utils` via handlers
         chat_id = 123
         user_message_id = 100
 
-        mock_bot = mock_telebot.TeleBot.return_value
+        mock_bot = mock_telebot_main.TeleBot.return_value
+        bot_provider._bot_instance = mock_bot
         self._create_mock_update("👨‍💻 В работе", chat_id=chat_id, message_id=user_message_id)
         
         mock_task_manager.get_user_state.return_value = {"state": "idle"}
@@ -144,10 +153,13 @@ class TestWebhookLogic(unittest.TestCase):
         mock_utils.save_new_bot_messages.assert_called_once_with(chat_id, [201, 202], state="idle")
 
     @patch('handlers.task_manager')
+    @patch('bot_provider.telebot')
+    @patch('update_processor.telebot')
     @patch('main.telebot')
     @patch('main.https_fn')
-    def test_delete_task_only_by_author(self, mock_https_fn, mock_telebot, mock_task_manager):
-        mock_bot = mock_telebot.TeleBot.return_value
+    def test_delete_task_only_by_author(self, mock_https_fn, mock_telebot_main, mock_telebot_processor, mock_telebot_provider, mock_task_manager):
+        mock_bot = mock_telebot_main.TeleBot.return_value
+        bot_provider._bot_instance = mock_bot
         task_id = "task-to-delete"
         author_username = "taskauthor"
         non_author_username = "anotheruser"
