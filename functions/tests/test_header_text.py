@@ -7,15 +7,18 @@ import os
 sys.modules['firebase_admin'] = MagicMock()
 
 import main
+from bot_provider import bot_provider
 from models import Task, STATUS_NEW, STATUS_IN_PROGRESS, STATUS_DONE, STATUS_ARCHIVED
 
 @patch('handlers.task_manager')
+@patch('bot_provider.telebot')
+@patch('update_processor.telebot')
 @patch('main.telebot')
 @patch('main.https_fn')
 class TestHeaderText(unittest.TestCase):
 
     def setUp(self):
-        main._bot_instance = None
+        bot_provider._bot_instance = None
         self.os_patcher = patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "test-token"})
         self.os_patcher.start()
         try:
@@ -26,7 +29,7 @@ class TestHeaderText(unittest.TestCase):
 
     def tearDown(self):
         self.os_patcher.stop()
-        main._bot_instance = None
+        bot_provider._bot_instance = None
 
     def _create_mock_update(self, text, chat_id=123, message_id=100):
         mock_update = MagicMock()
@@ -38,10 +41,11 @@ class TestHeaderText(unittest.TestCase):
         main.telebot.types.Update.de_json.return_value = mock_update
         return mock_update
 
-    def test_open_tasks_header_count(self, mock_https_fn, mock_telebot, mock_task_manager):
-        mock_telebot.reset_mock()
+    def test_open_tasks_header_count(self, mock_https_fn, mock_telebot_main, mock_telebot_processor, mock_telebot_provider, mock_task_manager):
+        mock_telebot_main.reset_mock()
         mock_task_manager.reset_mock()
-        mock_bot = mock_telebot.TeleBot.return_value
+        mock_bot = mock_telebot_main.TeleBot.return_value
+        bot_provider._bot_instance = mock_bot
         
         # Mock 5 open tasks
         tasks = [Task(id=str(i), chat_id=123, text=f"Task {i}", created_by="u", status=STATUS_NEW) for i in range(5)]
@@ -63,10 +67,11 @@ class TestHeaderText(unittest.TestCase):
         
         self.assertTrue(found, f"Header '{expected_header}' not found in send_message calls.")
 
-    def test_in_progress_tasks_header_count(self, mock_https_fn, mock_telebot, mock_task_manager):
-        mock_telebot.reset_mock()
+    def test_in_progress_tasks_header_count(self, mock_https_fn, mock_telebot_main, mock_telebot_processor, mock_telebot_provider, mock_task_manager):
+        mock_telebot_main.reset_mock()
         mock_task_manager.reset_mock()
-        mock_bot = mock_telebot.TeleBot.return_value
+        mock_bot = mock_telebot_main.TeleBot.return_value
+        bot_provider._bot_instance = mock_bot
         
         # Mock 2 in progress tasks
         tasks = [Task(id=str(i), chat_id=123, text=f"Task {i}", created_by="u", status=STATUS_IN_PROGRESS) for i in range(2)]
@@ -88,10 +93,11 @@ class TestHeaderText(unittest.TestCase):
         
         self.assertTrue(found, f"Header '{expected_header}' not found in send_message calls.")
     
-    def test_archived_tasks_header_count(self, mock_https_fn, mock_telebot, mock_task_manager):
-        mock_telebot.reset_mock()
+    def test_archived_tasks_header_count(self, mock_https_fn, mock_telebot_main, mock_telebot_processor, mock_telebot_provider, mock_task_manager):
+        mock_telebot_main.reset_mock()
         mock_task_manager.reset_mock()
-        mock_bot = mock_telebot.TeleBot.return_value
+        mock_bot = mock_telebot_main.TeleBot.return_value
+        bot_provider._bot_instance = mock_bot
         
         # Mock 10 archived tasks
         tasks = [Task(id=str(i), chat_id=123, text=f"Task {i}", created_by="u", status=STATUS_ARCHIVED) for i in range(10)]
